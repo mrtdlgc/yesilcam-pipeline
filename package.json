@@ -1,0 +1,30 @@
+{
+  "name": "yesilcam-subtitle-pipeline",
+  "version": "1.0.0",
+  "description": "Automated subtitle generation pipeline for Yeşilçam films",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "subtitles",
+    "whisper",
+    "yesilcam"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.7",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "ffmpeg-static": "^5.3.0",
+    "ffprobe-static": "^3.1.0",
+    "fluent-ffmpeg": "^2.1.2",
+    "groq-sdk": "^0.3.0",
+    "node-fetch": "^3.3.2",
+    "openai": "^4.28.0",
+    "youtube-dl-exec": "^2.4.0"
+  }
+}

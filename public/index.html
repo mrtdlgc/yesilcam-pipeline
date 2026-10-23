@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yeşilçam Subtitle Pipeline</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🎬 Yeşilçam Subtitle Pipeline</h1>
+      <p>Automated subtitle generation for classic Turkish cinema</p>
+    </header>
+
+    <div class="main-content">
+      <!-- Submit Form -->
+      <section class="submit-section">
+        <h2>Submit New Job</h2>
+
+        <!-- Tab Buttons -->
+        <div class="tab-buttons">
+          <button class="tab-btn active" data-tab="upload">Upload Audio</button>
+          <button class="tab-btn" data-tab="youtube">YouTube URL</button>
+        </div>
+
+        <!-- Upload Audio Tab -->
+        <div id="uploadTab" class="tab-content active">
+          <div class="upload-info">
+            <p><strong>Step 1:</strong> Download audio locally using yt-dlp:</p>
+            <code>yt-dlp -x --audio-format mp3 "YOUTUBE_URL"</code>
+            <p><strong>Step 2:</strong> Drag & drop the MP3 file below or click to select:</p>
+          </div>
+
+          <div id="dropZone" class="drop-zone">
+            <div class="drop-zone-content">
+              <span class="drop-icon">📁</span>
+              <p>Drag & drop audio file here</p>
+              <p class="drop-hint">or click to select</p>
+              <input type="file" id="audioFileInput" accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac" hidden>
+            </div>
+            <div id="uploadProgress" class="upload-progress hidden">
+              <div class="progress-bar">
+                <div id="uploadProgressFill" class="progress-fill"></div>
+              </div>
+              <span id="uploadProgressText">Uploading...</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="uploadTitle">Movie Title *</label>
+            <input
+              type="text"
+              id="uploadTitle"
+              placeholder="Film adı"
+              required
+            >
+          </div>
+        </div>
+
+        <!-- YouTube URL Tab -->
+        <div id="youtubeTab" class="tab-content">
+          <div class="upload-info warning">
+            <p><strong>Note:</strong> YouTube downloads may fail from VPS due to IP blocking.
+            Use the "Upload Audio" tab for more reliable processing.</p>
+          </div>
+
+          <form id="submitForm">
+            <div class="form-group">
+              <label for="youtubeUrl">YouTube URL *</label>
+              <input
+                type="text"
+                id="youtubeUrl"
+                name="youtubeUrl"
+                placeholder="https://youtube.com/watch?v=..."
+                required
+              >
+            </div>
+
+            <div class="form-group">
+              <label for="imdbId">IMDB ID (optional)</label>
+              <input
+                type="text"
+                id="imdbId"
+                name="imdbId"
+                placeholder="tt1234567"
+              >
+            </div>
+
+            <div class="form-group">
+              <label for="title">Movie Title (optional)</label>
+              <input
+                type="text"
+                id="title"
+                name="title"
+                placeholder="Film adı"
+              >
+            </div>
+
+            <button type="submit" class="btn-submit">Start Processing</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- Scanner Status -->
+      <section class="scanner-section">
+        <div class="section-header">
+          <h2>📂 Movies Scanner</h2>
+          <div class="scanner-header-actions">
+            <button id="scanNowBtn" class="btn-small btn-action">Scan Now</button>
+            <span id="scannerStatus" class="scanner-badge">Loading...</span>
+          </div>
+        </div>
+
+        <div id="scannerInfo" class="scanner-info">
+          <div class="scanner-stats">
+            <div class="stat-item">
+              <span class="stat-value" id="statTotalFiles">-</span>
+              <span class="stat-label">Total Files</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value" id="statProcessed">-</span>
+              <span class="stat-label">Processed</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value" id="statPending">-</span>
+              <span class="stat-label">Pending</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value" id="statQueued">-</span>
+              <span class="stat-label">In Queue</span>
+            </div>
+            <div class="stat-item stat-found">
+              <span class="stat-value" id="statFound">-</span>
+              <span class="stat-label">Found Subs</span>
+            </div>
+          </div>
+
+          <div id="currentJob" class="current-job hidden">
+            <strong>Currently Processing:</strong> <span id="currentJobTitle">-</span>
+          </div>
+
+          <div id="queueList" class="queue-list hidden">
+            <strong>Queue:</strong> <span id="queueTitles">-</span>
+          </div>
+        </div>
+
+        <!-- Found Subtitles Section -->
+        <div class="found-section">
+          <div class="section-header-small">
+            <h3>📥 Downloaded Subtitles</h3>
+            <button id="toggleFound" class="btn-small">Show</button>
+          </div>
+          <div id="foundList" class="found-list hidden"></div>
+        </div>
+
+        <!-- Skipped Files Log -->
+        <div class="skipped-section">
+          <div class="section-header-small">
+            <h3>Recently Skipped Files</h3>
+            <div class="section-actions">
+              <button id="resetAllBtn" class="btn-small btn-warning" title="Reset all processed files">Reset All</button>
+              <button id="toggleSkipped" class="btn-small">Show</button>
+            </div>
+          </div>
+          <div id="skippedList" class="skipped-list hidden"></div>
+        </div>
+      </section>
+
+      <!-- Jobs List -->
+      <section class="jobs-section">
+        <div class="section-header">
+          <h2>Processing Queue</h2>
+          <div class="header-actions">
+            <button id="clearQueueBtn" class="btn-small btn-warning">Clear Queue</button>
+            <button id="refreshBtn" class="btn-refresh">Refresh</button>
+          </div>
+        </div>
+
+        <div id="jobsList" class="jobs-list">
+          <p class="empty-state">No jobs yet. Submit a video to get started!</p>
+        </div>
+      </section>
+
+      <!-- Paused Jobs Section -->
+      <section class="paused-section">
+        <div class="section-header">
+          <h2>⏸️ Paused Jobs</h2>
+          <button id="refreshPausedBtn" class="btn-refresh">Refresh</button>
+        </div>
+        <p class="section-desc">Jobs paused after audio processing. Resume to continue with transcription.</p>
+
+        <div id="pausedJobsList" class="paused-list">
+          <p class="empty-state">No paused jobs. Enable PAUSE_AFTER_DEMUCS in config to use this feature.</p>
+        </div>
+      </section>
+
+      <!-- Translation Merge Section -->
+      <section class="merge-section">
+        <div class="section-header">
+          <h2>Merge Translations</h2>
+          <button id="refreshTranslationsBtn" class="btn-refresh">Refresh</button>
+        </div>
+        <p class="section-desc">After translating the JSON chunks, merge them back into an SRT file.</p>
+
+        <div id="translationsList" class="translations-list">
+          <p class="empty-state">No translation chunks found. Process a video first!</p>
+        </div>
+      </section>
+    </div>
+
+    <!-- Job Detail Modal -->
+    <div id="jobModal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="modalTitle">Job Details</h3>
+          <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div id="jobDetails"></div>
+          <div class="logs-section">
+            <h4>Processing Logs</h4>
+            <div id="jobLogs" class="logs-container"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button onclick="closeModal()" class="btn-secondary">Close</button>
+          <button id="deleteJobBtn" class="btn-danger">Delete Job</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app-config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+whisperx_venv/
+
+# Environment
+.env
+
+# Temporary files
+temp/
+*.tmp
+
+# Output files (optional - uncomment if you want to track outputs)
+# output/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.Python
+*.egg-info/
