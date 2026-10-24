@@ -41,6 +41,11 @@ export async function reconcileRequest(
 ) {
   if (!/^[a-zA-Z0-9_-]{1,60}$/.test(chunk))
     throw Object.assign(new Error('Invalid chunk ID'), { status: 400 });
+  if (
+    options.remoteId !== undefined &&
+    (typeof options.remoteId !== 'string' || !/^[a-zA-Z0-9_-]{1,200}$/.test(options.remoteId))
+  )
+    throw Object.assign(new Error('Invalid provider transcript ID'), { status: 400 });
   if (options.remoteId && options.allowNewRequest)
     throw Object.assign(new Error('Choose retrieval or a new request'), { status: 400 });
   const dir = at('output', 'raw_transcriptions', jobId(id));
@@ -56,8 +61,6 @@ export async function reconcileRequest(
         throw Object.assign(new Error('This request cannot be recovered by remote ID'), {
           status: 409,
         });
-      if (!/^[a-zA-Z0-9_-]{1,200}$/.test(options.remoteId))
-        throw Object.assign(new Error('Invalid provider transcript ID'), { status: 400 });
       Object.assign(state, {
         remoteId: options.remoteId,
         submissionResponse: { id: options.remoteId },

@@ -1017,6 +1017,8 @@ router.get('/api/jobs/:id/requests', async (req, res) => {
   res.json({ requests: await inspectRequests(jobId(req.params.id)) });
 });
 router.post('/api/jobs/:id/reconcile', async (req, res) => {
+  if (req.body?.remoteId === undefined && req.body?.allowNewRequest !== true)
+    return fail(400, 'Choose an existing transcript ID or authorize a new request');
   await updateJob(jobId(req.params.id), async (job) => {
     if (['queued', 'processing'].includes(job.status))
       return fail(409, 'Cancel the active or queued job before reconciling');

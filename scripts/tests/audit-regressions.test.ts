@@ -258,6 +258,7 @@ test('dead request locks are reclaimed, live locks refused, archived costs retai
     reconcileRequest('recover', '0', { allowNewRequest: true, note: ' ' }),
     /note/,
   );
+  await assert.rejects(reconcileRequest('recover', '0', { remoteId: '' }), /transcript ID/);
   await reconcileRequest('recover', '0', { remoteId: 'saved-id' });
   assert.equal((await readJson(path.join(dir, 'chunk_0.request.json'))).status, 'accepted');
   await reconcileRequest('recover', '0', {
