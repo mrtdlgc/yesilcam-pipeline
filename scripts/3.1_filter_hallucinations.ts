@@ -1,3 +1,4 @@
+import { timeRange } from './lib/sorted.js';
 import type { Segment } from '../types/pipeline.js';
 import type { PipelineOptions } from '../types/pipeline.js';
 /**
@@ -10,10 +11,14 @@ import type { PipelineOptions } from '../types/pipeline.js';
 import { energyProfile } from './lib/audio.js';
 import { at, writeJson } from './lib/files.js';
 import fs from 'fs/promises';
-import path from 'path';
+import path from 'node:path';
 import { config } from '../config.js';
 
 // Common Whisper hallucination patterns (case-insensitive matching)
+const transcriptLog = (...values: unknown[]) => {
+  if (config.LOG_TRANSCRIPT_TEXT) console.log(...values);
+};
+
 const HALLUCINATION_PATTERNS = [
   // Turkish - Subtitle credits and channel promos
   /^İzlediğiniz için teşekkür/i,
@@ -69,7 +74,6 @@ const HALLUCINATION_PATTERNS = [
 
   // Repetition artifacts (Whisper looping)
   /(.)\1{10,}/, // Same character repeated 10+ times
-  /(\b\w+\b)\s+\1\s+\1\s+\1/i, // Same word repeated 4+ times
 ];
 
 /**
@@ -136,10 +140,10 @@ async function loadFFTReport(reportPath: any) {
   try {
     const content = await fs.readFile(reportPath, 'utf-8');
     const report = JSON.parse(content);
-    console.log(`  Loaded FFT report: ${report.summary?.totalWindows || 0} windows analyzed`);
+    transcriptLog(`  Loaded FFT report: ${report.summary?.totalWindows || 0} windows analyzed`);
     return report;
   } catch (err) {
-    console.log(`  No FFT report found at ${reportPath}`);
+    transcriptLog(`  No FFT report found at ${reportPath}`);
     return null;
   }
 }
@@ -268,7 +272,7 @@ function checkDurationTextRatio(text: string, duration: number) {
  * Get energy for a time range
  */
 function getEnergyInRange(profile: any, startTime: number, endTime: any) {
-  const framesInRange = profile.filter((p: any) => p.time >= startTime && p.time <= endTime);
+  const framesInRange = timeRange<{ time: number; energy: number }>(profile, startTime, endTime);
   if (framesInRange.length === 0) return { avg: 0, max: 0, frames: 0 };
 
   const energies = framesInRange.map((p: any) => p.energy);
@@ -313,6 +317,12 @@ function classifySegment(
     reasons.push(`pattern_match: "${seg.text.substring(0, 30)}"`);
   }
 
+  const repetition = /(?<!\p{L})(\p{L}+)(?:\s+\1){3,}(?!\p{L})/iu.test(seg.text);
+  if (repetition) {
+    score += 2;
+    reasons.push('repeated_words_review');
+  }
+
   // 2. CHECK DURATION/TEXT RATIO
   const durationCheck = checkDurationTextRatio(seg.text, duration);
   if (!durationCheck.valid) {
@@ -324,7 +334,7 @@ function classifySegment(
   const fftClass = getFFTClassification(fftReport, seg.start, seg.end);
   if (fftClass.score > 0) {
     score += fftClass.score;
-    reasons.push(`fft_${fftClass.type}=${fftClass.coverage.toFixed(0)}%`);
+    reasons.push(`fft_${fftClass.type}=${(fftClass.coverage * 100).toFixed(0)}%`);
   }
 
   // 4. Check Whisper metadata indicators
@@ -376,7 +386,16 @@ function classifySegment(
     (!durationCheck.valid ? 5 : 0) +
     (duration < THRESHOLDS.MIN_DURATION ? 1 : 0) +
     (duration > THRESHOLDS.MAX_DURATION ? 1 : 0);
-  return { score, dropScore: score - timingScore, reasons };
+  const independentEvidence =
+    patternMatch ||
+    fftClass.score > 0 ||
+    seg.no_speech_prob > THRESHOLDS.NO_SPEECH_PROB ||
+    seg.compression_ratio > THRESHOLDS.COMPRESSION_RATIO;
+  return {
+    score,
+    dropScore: independentEvidence ? score - timingScore - (repetition ? 2 : 0) : 0,
+    reasons,
+  };
 }
 
 /**
@@ -398,8 +417,8 @@ export async function filterHallucinations(
     fftReportPath = null, // Optional path to FFT speech detection report
   } = options;
 
-  console.log('Filtering hallucinations...');
-  console.log(`  Analyzing ${segments.length} segments`);
+  transcriptLog('Filtering hallucinations...');
+  transcriptLog(`  Analyzing ${segments.length} segments`);
 
   // Load FFT report if provided
   let fftReport = null;
@@ -485,52 +504,52 @@ export async function filterHallucinations(
     fftReportUsed: !!fftReport,
   };
 
-  console.log(
+  transcriptLog(
     `  Results: ${stats.kept} kept, ${stats.dropped} dropped, ${stats.suspicious} suspicious`,
   );
-  console.log(`    - Pattern matches: ${patternDrops.length}`);
-  console.log(`    - Duration mismatch: ${durationDrops.length}`);
+  transcriptLog(`    - Pattern matches: ${patternDrops.length}`);
+  transcriptLog(`    - Duration mismatch: ${durationDrops.length}`);
   if (fftReport) {
-    console.log(`    - FFT non-speech: ${fftDrops.length}`);
+    transcriptLog(`    - FFT non-speech: ${fftDrops.length}`);
   }
-  console.log(`    - Low energy: ${energyDrops.length}`);
+  transcriptLog(`    - Low energy: ${energyDrops.length}`);
 
   // Log pattern-based drops (always show all - these are definite hallucinations)
   if (patternDrops.length > 0) {
-    console.log('');
-    console.log('  Pattern-matched hallucinations:');
+    transcriptLog('');
+    transcriptLog('  Pattern-matched hallucinations:');
     for (const seg of patternDrops) {
-      console.log(`    [${seg.start.toFixed(2)}-${seg.end.toFixed(2)}] "${seg.text}"`);
+      transcriptLog(`    [${seg.start.toFixed(2)}-${seg.end.toFixed(2)}] "${seg.text}"`);
     }
   }
 
   // Log duration mismatch drops
   if (durationDrops.length > 0) {
-    console.log('');
-    console.log('  Duration mismatch drops:');
+    transcriptLog('');
+    transcriptLog('  Duration mismatch drops:');
     for (const seg of durationDrops.slice(0, 5)) {
       const duration = seg.end - seg.start;
       const words = seg.text.split(/\s+/).length;
-      console.log(
+      transcriptLog(
         `    [${seg.start.toFixed(2)}-${seg.end.toFixed(2)}] ${words} words in ${duration.toFixed(1)}s: "${seg.text.substring(0, 40)}..."`,
       );
     }
     if (durationDrops.length > 5) {
-      console.log(`    ... and ${durationDrops.length - 5} more`);
+      transcriptLog(`    ... and ${durationDrops.length - 5} more`);
     }
   }
 
   // Log energy-based drops (sample)
   if (energyDrops.length > 0) {
-    console.log('');
-    console.log('  Energy-based drops (sample):');
+    transcriptLog('');
+    transcriptLog('  Energy-based drops (sample):');
     for (const seg of energyDrops.slice(0, 5)) {
-      console.log(
+      transcriptLog(
         `    [${seg.start.toFixed(2)}-${seg.end.toFixed(2)}] "${seg.text.substring(0, 40)}..." (${seg._filterReasons.join(', ')})`,
       );
     }
     if (energyDrops.length > 5) {
-      console.log(`    ... and ${energyDrops.length - 5} more`);
+      transcriptLog(`    ... and ${energyDrops.length - 5} more`);
     }
   }
 
@@ -563,34 +582,34 @@ if (process.argv[1]?.endsWith('3.1_filter_hallucinations.js')) {
     args.find((a) => a.startsWith('--fft='))?.replace('--fft=', '');
 
   if (!audioFile || !rawJsonFile) {
-    console.log(
+    transcriptLog(
       'Usage: node 3.1_filter_hallucinations.js <audio_file> <raw_json_file> [fft_report.json]',
     );
-    console.log('');
-    console.log('Filters hallucinations from Whisper transcription using audio energy analysis.');
-    console.log('');
-    console.log('Inputs:');
-    console.log('  audio_file      - The audio file that was transcribed');
-    console.log('  raw_json_file   - The raw JSON output from Groq Whisper');
-    console.log(
+    transcriptLog('');
+    transcriptLog('Filters hallucinations from Whisper transcription using audio energy analysis.');
+    transcriptLog('');
+    transcriptLog('Inputs:');
+    transcriptLog('  audio_file      - The audio file that was transcribed');
+    transcriptLog('  raw_json_file   - The raw JSON output from Groq Whisper');
+    transcriptLog(
       '  fft_report.json - (Optional) FFT speech report from test_speech_detection.js --save-report',
     );
-    console.log('');
-    console.log('The FFT report adds scoring for segments in silence/music/ambiguous regions.');
-    console.log(
+    transcriptLog('');
+    transcriptLog('The FFT report adds scoring for segments in silence/music/ambiguous regions.');
+    transcriptLog(
       'Generate it with: node build/scripts/test_speech_detection.js <audio> --save-report',
     );
-    console.log('');
-    console.log('Outputs filtered results to console and saves to raw_transcriptions folder.');
+    transcriptLog('');
+    transcriptLog('Outputs filtered results to console and saves to raw_transcriptions folder.');
     process.exit(1);
   }
 
-  console.log(`Audio: ${audioFile}`);
-  console.log(`Raw JSON: ${rawJsonFile}`);
+  transcriptLog(`Audio: ${audioFile}`);
+  transcriptLog(`Raw JSON: ${rawJsonFile}`);
   if (fftReportPath) {
-    console.log(`FFT Report: ${fftReportPath}`);
+    transcriptLog(`FFT Report: ${fftReportPath}`);
   }
-  console.log('');
+  transcriptLog('');
 
   const rawContent = await fs.readFile(rawJsonFile, 'utf-8');
   const rawData = JSON.parse(rawContent);
@@ -611,16 +630,16 @@ if (process.argv[1]?.endsWith('3.1_filter_hallucinations.js')) {
     fftReportPath,
   });
 
-  console.log('');
-  console.log('═══════════════════════════════════════════════════════════════');
-  console.log('  FILTER SUMMARY');
-  console.log('═══════════════════════════════════════════════════════════════');
-  console.log(`  Total segments: ${stats.total}`);
-  console.log(`  Kept: ${stats.kept}`);
-  console.log(`  Dropped: ${stats.dropped}`);
-  console.log(`  Suspicious: ${stats.suspicious}`);
+  transcriptLog('');
+  transcriptLog('═══════════════════════════════════════════════════════════════');
+  transcriptLog('  FILTER SUMMARY');
+  transcriptLog('═══════════════════════════════════════════════════════════════');
+  transcriptLog(`  Total segments: ${stats.total}`);
+  transcriptLog(`  Kept: ${stats.kept}`);
+  transcriptLog(`  Dropped: ${stats.dropped}`);
+  transcriptLog(`  Suspicious: ${stats.suspicious}`);
   if (stats.fftReportUsed) {
-    console.log(`  FFT report: Used`);
+    transcriptLog(`  FFT report: Used`);
   }
-  console.log('═══════════════════════════════════════════════════════════════');
+  transcriptLog('═══════════════════════════════════════════════════════════════');
 }

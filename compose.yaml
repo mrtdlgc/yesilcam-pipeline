@@ -7,7 +7,7 @@ services:
         INSTALL_LOCAL_WHISPER: 'false'
         INSTALL_LOCAL_AUDIO: 'false'
     restart: unless-stopped
-    stop_grace_period: 30s
+    stop_grace_period: 31m
     cpus: 2.0
     mem_limit: 4g
     pids_limit: 256

@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "exclude": [
+    "build",
+    "node_modules",
+    "public",
+    "scripts/tests",
+    "legacy",
+    "scripts/generate-provider-docs.ts"
+  ]
+}

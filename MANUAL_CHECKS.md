@@ -36,9 +36,10 @@ remain manual checks; automated tests use simulated provider responses.
 Complete the deployment checks in [DEPLOYMENT.md](DEPLOYMENT.md), then follow README setup. Keep
 movies/ empty initially to avoid automatic film jobs. Sign in to your deployment. Upload a 30–60
 second clip containing dialogue over music, a quiet/short line, and a silent passage. Use spoken tr
-/ target en. Expected: OpenRouter and `elevenlabs/scribe-v2` are selected by default; original
-chunks feed ASR directly, without a Demucs stage, process, or model download. Source SRT and review
-JSON appear. A translation appears only when enabled. A missing dependency is a visible error.
+/ target en. Expected: direct ElevenLabs and `scribe_v2` are selected by default; a continuous
+original-audio FLAC feeds ASR without a Demucs stage, process, or model download. Source SRT and
+review JSON appear. A translation appears only when enabled. A missing dependency is a visible
+error.
 
 ## 2. transcription quality
 
@@ -75,13 +76,14 @@ policy is intentionally OFF by default.
 
 ## 5. queue, pause and restart
 
-Submit two small jobs while one is processing; only one may run inference. With
-PAUSE_BEFORE_TRANSCRIPTION=true, try upload, YouTube and movies/ inputs. Each should stop as paused,
-remain listed, and resume through the same queue. Stop the server during transcription and restart.
-The interrupted job must remain visible, and Retry should reuse validated completed chunks. Cancel a
-job and confirm no child ffmpeg/Python process continues working. Terminate a worker once during a
-short test: failure must release the queue. A restart or retry before the review gate must still
-pause before ASR; only explicitly continuing a paused job crosses the gate.
+Submit two small jobs while one is processing; only one may run inference. With the **Pause before
+transcription** checkbox (or `PAUSE_BEFORE_TRANSCRIPTION: true` in `config.ts`), try upload, YouTube
+and movies/ inputs. Each should stop as paused, remain listed, and resume through the same queue.
+Stop the server during transcription and restart. The interrupted job must remain visible, and Retry
+should reuse validated completed chunks. Cancel a job and confirm no child ffmpeg/Python process
+continues working. Terminate a worker once during a short test: failure must release the queue. A
+restart or retry before the review gate must still pause before ASR; only explicitly continuing a
+paused job crosses the gate.
 
 On a copy of a legacy paused Demucs job with no ASR checkpoints, restart the updated server. It must
 remain paused, select OpenRouter Scribe v2 and original chunks, save the previous manifest, and keep
@@ -124,9 +126,9 @@ should say Skipped, and model setup with no percentage should stay indeterminate
 to verify live updates. Cancel a stage and check that its last measured count remains visible. For a
 job with **Pause before transcription**, interrupt/retry before preparation finishes: it must still
 pause before speech detection and ASR. Open **Review audio chunks**, play the source audio, change
-pages, and download a WAV. A legacy job should retain its archived vocal comparison. Seeking should
-work via HTTP Range requests. An incomplete archived vocal file must not be playable; a signed-out
-audio request must return 401. Closing the dialog should stop playback.
+pages, and download a prepared audio file. A legacy job should retain its archived vocal comparison.
+Seeking should work via HTTP Range requests. An incomplete archived vocal file must not be playable;
+a signed-out audio request must return 401. Closing the dialog should stop playback.
 
 Use a title containing apostrophes, quotes, Turkish characters and HTML text. It must display
 literally, including in logs and modal details. A request with another Origin/Host or without
@@ -178,7 +180,6 @@ silently discarded or let a stale subtitle download through. Inspect current SRT
 originals separately. After a server restart/redeploy, verify the corrections and screening media
 survive.
 
-A screening-preparation failure should leave subtitles available, retain the source and pause the
-batch by default. Use **Retry screening preparation**, then resume the queue; provider usage must
-not increase. Legacy `?session=...` Ah Nerede screenings keep their original browser-local notes
-workflow.
+A screening-preparation failure should leave subtitles available, retain the source while the next
+subtitle job proceeds. Use **Retry screening preparation**; provider usage must not increase. Legacy
+`?session=...` Ah Nerede screenings keep their original browser-local notes workflow.

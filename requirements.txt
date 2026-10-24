@@ -8,4 +8,4 @@ scipy==1.15.3
 # CPU PyTorch runs Silero; source audio is decoded with ffmpeg.
 # Demucs and its separator models are no longer part of the runtime.
 # These are direct pins, not a complete transitive/environment lock.
-# Install requirements-whisper.txt in a separate environment for CTranslate2 CUDA 12.
+# CPU Docker builds may install requirements-whisper.txt here; isolate its venv for native CUDA use.

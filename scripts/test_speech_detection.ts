@@ -12,10 +12,10 @@ import { at } from './lib/files.js';
 import { probe, run } from './lib/process.js';
 import { randomUUID } from 'node:crypto';
 import fs from 'fs/promises';
-import path from 'path';
-import { Worker } from 'worker_threads';
-import { fileURLToPath } from 'url';
-import os from 'os';
+import path from 'node:path';
+import { Worker } from 'node:worker_threads';
+import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

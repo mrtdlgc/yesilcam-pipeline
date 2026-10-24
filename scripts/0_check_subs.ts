@@ -43,7 +43,10 @@ export async function searchOpenSubtitles({
   const token = await credential('OPENSUBTITLES_TOKEN');
   if (token) headers.Authorization = `Bearer ${token}`;
   const params = new URLSearchParams({ languages: language, type: 'movie' });
-  if (imdbId) {
+  if (movie) {
+    params.set('moviehash', movie.hash);
+    params.set('moviebytesize', String(movie.size));
+  } else if (imdbId) {
     if (!/^(tt)?\d{5,12}$/.test(imdbId)) throw new Error('Invalid IMDb ID');
     params.set('imdb_id', imdbId.replace(/^tt/, ''));
   } else if (movie) {
@@ -56,13 +59,20 @@ export async function searchOpenSubtitles({
       signal,
     })
   ).json();
-  const match = data.data?.find(
-    (item: any) =>
-      item.attributes?.language === language &&
-      item.attributes?.files?.length === 1 &&
-      item.attributes.files[0].file_id &&
-      (!movie || item.attributes.moviehash_match === true),
-  );
+  const match = data.data
+    ?.filter(
+      (item: any) =>
+        item.attributes?.language === language &&
+        !item.attributes.ai_translated &&
+        !item.attributes.machine_translated &&
+        item.attributes?.files?.length === 1 &&
+        item.attributes.files[0].file_id &&
+        (!movie || item.attributes.moviehash_match === true),
+    )
+    .sort(
+      (a: any, b: any) =>
+        Number(b.attributes.download_count || 0) - Number(a.attributes.download_count || 0),
+    )[0];
   if (!match) return null;
   const fileId = match.attributes.files[0].file_id;
   const download = (
@@ -77,7 +87,7 @@ export async function searchOpenSubtitles({
     throw new Error('Invalid OpenSubtitles download URL');
   const content = (await fetchLimited(download.link, { signal })).text;
   if (!parseSrt(content).length) throw new Error('Downloaded subtitle is empty');
-  return { source: 'opensubtitles', language, content, fileId };
+  return { source: 'opensubtitles', language, content, fileId, referenceOnly: !movie };
 }
 
 export async function checkExistingSubtitles(
@@ -92,9 +102,13 @@ export async function checkExistingSubtitles(
         ['--skip-download', '--dump-single-json', '--', validateYouTubeUrl(youtubeUrl)],
         { signal: options.signal, timeout: 60000 },
       );
-      const track = JSON.parse(stdout).subtitles?.[language]?.find(
-        (item: any) => item.ext === 'json3',
-      );
+      const subtitles = JSON.parse(stdout).subtitles ?? {};
+      const keys = Object.keys(subtitles)
+        .filter(
+          (key) => key === language || key.toLowerCase().startsWith(`${language.toLowerCase()}-`),
+        )
+        .sort((a, b) => Number(b === language) - Number(a === language));
+      const track = keys.flatMap((key) => subtitles[key]).find((item: any) => item.ext === 'json3');
       if (track) {
         const data = (await fetchLimited(track.url, { signal: options.signal })).json();
         const segments = (data.events ?? [])
@@ -124,7 +138,7 @@ export async function checkExistingSubtitles(
     try {
       return await searchOpenSubtitles({
         imdbId,
-        movie: !imdbId && options.input ? await movieHash(options.input) : null,
+        movie: options.input ? await movieHash(options.input) : null,
         language,
         signal: options.signal,
       });

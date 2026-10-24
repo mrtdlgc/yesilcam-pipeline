@@ -24,12 +24,11 @@ import {
   contained,
   readJson,
   writeJson,
-  JsonStore,
   serialized,
   atomicWrite,
   titleSlug,
 } from './scripts/lib/files.js';
-import { withTempBudget, storageStatus } from './scripts/lib/storage.js';
+import { withTempBudget, storageStatus, directoryBytes } from './scripts/lib/storage.js';
 import {
   queueControl,
   pauseQueue,
@@ -37,7 +36,10 @@ import {
   submissionKey,
   jobSummary,
 } from './scripts/lib/queue.js';
-import { probe } from './scripts/lib/process.js';
+import { QueueStore, progressWriter } from './scripts/lib/queue-store.js';
+import { drainPaidWork } from './scripts/lib/paid-work.js';
+import { inspectRequests, reconcileRequest } from './scripts/lib/request-recovery.js';
+import { probe, terminateChildren } from './scripts/lib/process.js';
 import { runPipeline, validateSettings } from './scripts/pipeline.js';
 import { validateYouTubeUrl } from './scripts/1_download_video.js';
 import {
@@ -64,6 +66,7 @@ import {
   editSubtitleReview,
   reviewExport,
   saveReviewPosition,
+  removeScreeningCopy,
 } from './scripts/lib/subtitle-review.js';
 import {
   codexStatus,
@@ -123,7 +126,7 @@ const releaseLock = await acquireInstanceLock();
 await initializeCredentials();
 await clearStaleCookieFiles();
 await initializePassword();
-const store = new JsonStore<QueueState>(at('data', 'processing-queue.json'), {
+const store = new QueueStore(at('data', 'processing-queue.json'), {
   version: 1,
   jobs: [],
   processed: {},
@@ -241,6 +244,7 @@ async function addJob(data: any) {
   const { transcriptionSettings, ...inputData } = data;
   const job: Job = {
     ...inputData,
+    pathSchema: 1,
     id: data.id ?? jobId(),
     status: 'queued',
     progress: 0,
@@ -333,8 +337,7 @@ async function prepareJobReview(job: Job, result: any, signal?: AbortSignal) {
   }
 }
 async function cleanupSuccessfulJob(job: Job) {
-  if (job.intermediatesRemoved || (job.settings.KEEP_INTERMEDIATES ?? config.KEEP_INTERMEDIATES))
-    return;
+  if (job.settings.KEEP_INTERMEDIATES ?? config.KEEP_INTERMEDIATES) return;
   try {
     await preserveCodexReceipt(at('temp', job.id), at('data', 'translation-receipts', job.id));
     await fs.rm(await contained(at('temp'), job.id), { recursive: true, force: true });
@@ -369,15 +372,19 @@ async function pump() {
         return structuredClone(item);
       });
       if (!job) break;
+      const updates = progressWriter((mutate) => updateJob(job.id, mutate));
       try {
         const result = await runPipeline(job, {
           signal: controller.signal,
           resume: job.resume === true,
           onStage: async (update) =>
-            updateJob(job.id, (item) => {
-              item.stages ??= createStages(item);
-              applyStage(item.stages, update);
-            }),
+            updates.push(
+              (item) => {
+                item.stages ??= createStages(item);
+                applyStage(item.stages, update);
+              },
+              update.status !== undefined && update.status !== 'running',
+            ),
           onWarning: async (message) =>
             updateJob(job.id, (item) => {
               item.logs = [
@@ -386,7 +393,7 @@ async function pump() {
               ].slice(-200);
             }),
           progress: async (progress, message) =>
-            updateJob(job.id, (item) => {
+            updates.push((item) => {
               item.progress = Math.min(100, Math.max(0, progress));
               item.logs = [
                 ...(item.logs ?? []),
@@ -394,18 +401,12 @@ async function pump() {
               ].slice(-200);
             }),
         });
-        if (!result.paused && job.settings.PREPARE_REVIEW !== false)
-          await prepareJobReview(job, result, controller.signal);
+        await updates.flush();
         await updateJob(job.id, (item, state) => {
           item.status = result.paused ? 'paused' : 'completed';
           item.result = result;
           item.finishedAt = now();
           item.resume = false;
-          if (result.reviewStatus === 'failed' && config.PAUSE_ON_FAILURE)
-            pauseQueue(
-              state,
-              `Subtitles are saved, but screening preparation failed for ${item.title}. Retry its screening before resuming the batch.`,
-            );
           if (item.sourceKey && !result.paused)
             state.processed[item.sourceKey] = {
               filename: path.basename(item.input ?? ''),
@@ -413,8 +414,13 @@ async function pump() {
               at: now(),
             };
         });
-        if (!result.paused && result.reviewStatus !== 'failed') await cleanupSuccessfulJob(job);
+        if (!result.paused) {
+          if (job.settings.PREPARE_REVIEW !== false && !stopping)
+            await startReviewTask({ ...job, status: 'completed', result });
+          else if (job.settings.PREPARE_REVIEW === false) await cleanupSuccessfulJob(job);
+        }
       } catch (error) {
+        await updates.flush();
         const manifest = await readJson(at('temp', job.id, 'manifest.json'), null).catch(
           () => null,
         );
@@ -473,6 +479,11 @@ async function pump() {
 }
 
 const app = express();
+const trustedProxies = (process.env.TRUSTED_PROXIES || '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+if (trustedProxies.length) app.set('trust proxy', trustedProxies);
 app.disable('x-powered-by');
 // Public, minimal liveness check; works through the proxy and inside the image.
 app.get('/health', (req, res) =>
@@ -480,9 +491,15 @@ app.get('/health', (req, res) =>
 );
 app.use((req, res, next) => {
   if (stopping) return res.status(503).json({ error: 'Server is stopping' });
-  if (req.headers.host !== PUBLIC_ORIGIN.host)
+  const local =
+    PUBLIC_ORIGIN.protocol === 'http:' &&
+    ['127.0.0.1', 'localhost', '[::1]'].includes(PUBLIC_ORIGIN.hostname);
+  const allowedHosts = local
+    ? new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`, `[::1]:${PORT}`])
+    : new Set([PUBLIC_ORIGIN.host]);
+  if (!allowedHosts.has(req.headers.host || ''))
     return res.status(403).json({ error: 'Host does not match PUBLIC_ORIGIN' });
-  if (req.headers.origin && req.headers.origin !== PUBLIC_ORIGIN.origin)
+  if (req.headers.origin && req.headers.origin !== `${PUBLIC_ORIGIN.protocol}//${req.headers.host}`)
     return res.status(403).json({ error: 'Same-origin requests required' });
   if (req.headers['sec-fetch-site'] === 'cross-site')
     return res.status(403).json({ error: 'Cross-site requests are disabled' });
@@ -672,7 +689,13 @@ router.post('/api/upload-audio', async (req, res) => {
       if (!bytes || (declared !== null && bytes !== declared)) fail(400, 'Incomplete upload');
       const info = await probe(input, { signal: controller.signal });
       if (info.duration > config.MAX_INPUT_DURATION_SEC) fail(413, 'Audio duration exceeds limit');
-      const job = await addJob({ ...data, id, type: 'audio', input });
+      const type = info.streams.some(
+        (stream: { codec_type: string; disposition?: { attached_pic?: number } }) =>
+          stream.codec_type === 'video' && !stream.disposition?.attached_pic,
+      )
+        ? 'video'
+        : 'audio';
+      const job = await addJob({ ...data, id, type, input });
       accepted = true;
       await fs.rm(path.join(dir, 'upload-staging.json'), { force: true });
       res.status(201).json({ jobId: job.id });
@@ -821,7 +844,9 @@ router.get('/api/jobs', async (req, res) => {
     offset < 0
   )
     fail(400, 'Use a limit of 1–200 and a nonnegative offset');
-  const jobs = (await store.read()).jobs;
+  const jobs = (await store.read()).jobs.filter(
+    (job) => req.query.type !== 'translation' || job.type === 'translation',
+  );
   const page = jobs
     .slice()
     .reverse()
@@ -911,18 +936,47 @@ router.post('/api/jobs/clear', async (req, res) => {
   });
   res.json(result);
 });
+router.post('/api/jobs/archive', async (_req, res) => {
+  const archived = await store.update(async (state) => {
+    const ids = new Set<string>();
+    for (const job of state.jobs) {
+      if (
+        !terminal.has(job.status) ||
+        reviewTasks.has(job.id) ||
+        (await fs.stat(at('temp', job.id)).catch(() => null))
+      )
+        continue;
+      await writeJson(at('data', 'job-archive', `${jobId(job.id)}.json`), job);
+      ids.add(job.id);
+    }
+    state.jobs = state.jobs.filter((job) => !ids.has(job.id));
+    return ids.size;
+  });
+  res.json({ archived });
+});
+router.post('/api/jobs/:id/remove-screening', async (req, res) => {
+  const id = jobId(req.params.id);
+  if (reviewTasks.has(id)) return fail(409, 'Wait for screening preparation to finish');
+  await updateJob(id, async (job) => {
+    if (job.status !== 'completed') return fail(409, 'Only completed screenings can be removed');
+    await removeScreeningCopy(id);
+    job.result = { ...job.result, reviewStatus: 'removed' };
+  });
+  res.json({ success: true });
+});
 router.get('/api/jobs/:id', async (req, res) => {
   const job = (await store.read()).jobs.find((job) => job.id === jobId(req.params.id));
   if (!job) return fail(404, 'Job not found');
-  res.json(job);
+  const hasIntermediates = Boolean(await fs.stat(at('temp', job.id)).catch(() => null));
+  res.json({
+    ...job,
+    hasIntermediates,
+    screeningBytes: await directoryBytes(at('review-sessions', job.id)),
+  });
 });
-router.post('/api/jobs/:id/prepare-review', async (req, res) => {
-  const id = jobId(req.params.id);
-  const job = (await store.read()).jobs.find((item) => item.id === id);
-  if (!job) return fail(404, 'Job not found');
-  if (job.status !== 'completed')
-    return fail(409, 'Finish the subtitle job before preparing its screening');
-  if (reviewTasks.has(id)) return res.status(202).json({ preparing: true });
+async function startReviewTask(job: Job) {
+  const id = job.id;
+  if (reviewTasks.has(id)) return;
   const controller = new AbortController();
   reviewTasks.set(id, controller);
   try {
@@ -950,7 +1004,29 @@ router.post('/api/jobs/:id/prepare-review', async (req, res) => {
       reviewTasks.delete(id);
     }
   })().catch((error) => console.error('Screening preparation:', error.message));
+}
+router.post('/api/jobs/:id/prepare-review', async (req, res) => {
+  const job = (await store.read()).jobs.find((item) => item.id === jobId(req.params.id));
+  if (!job) return fail(404, 'Job not found');
+  if (job.status !== 'completed')
+    return fail(409, 'Finish the subtitle job before preparing its screening');
+  await startReviewTask(job);
   res.status(202).json({ preparing: true });
+});
+router.get('/api/jobs/:id/requests', async (req, res) => {
+  res.json({ requests: await inspectRequests(jobId(req.params.id)) });
+});
+router.post('/api/jobs/:id/reconcile', async (req, res) => {
+  await updateJob(jobId(req.params.id), async (job) => {
+    if (['queued', 'processing'].includes(job.status))
+      return fail(409, 'Cancel the active or queued job before reconciling');
+    await reconcileRequest(job.id, String(req.body?.chunkId ?? ''), {
+      remoteId: req.body?.remoteId,
+      allowNewRequest: req.body?.allowNewRequest === true,
+      note: req.body?.note,
+    });
+  });
+  res.json({ success: true });
 });
 router.get('/api/reviews/:id', async (req, res) => {
   res.json(reviewView(await readSubtitleReview(jobId(req.params.id))));
@@ -1066,10 +1142,10 @@ router.post('/api/jobs/:id/retry', async (req, res) => {
   res.json({ jobId: req.params.id });
 });
 router.post('/api/paused-jobs/:id/configure', async (req, res) => {
+  const input = await jobInput({ ...req.body, pauseBeforeTranscription: true });
   await updateJob(jobId(req.params.id), async (job) => {
     if (job.status !== 'paused' || job.intermediatesRemoved)
       fail(409, 'Job must be paused with its source audio retained');
-    const input = await jobInput({ ...req.body, title: job.title, pauseBeforeTranscription: true });
     const manifest = await configurePausedAudio(job.id, {
       ...job.settings,
       ...input.transcriptionSettings,
@@ -1228,6 +1304,14 @@ async function scanMovies(manual = false) {
     skippedFiles = [];
     const present = new Set(names);
     for (const name of observations.keys()) if (!present.has(name)) observations.delete(name);
+    const manualStats = new Map<string, string>();
+    if (manual) {
+      for (const filename of names) {
+        const stat = await fs.stat(await contained(at('movies'), filename)).catch(() => null);
+        if (stat) manualStats.set(filename, `${filename}:${stat.size}:${stat.mtimeMs}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
     const candidates: {
       filename: string;
       input: string;
@@ -1249,7 +1333,11 @@ async function scanMovies(manual = false) {
         fingerprint,
         seen: previous?.fingerprint === fingerprint ? previous.seen : Date.now(),
       });
-      if (!previous || previous.fingerprint !== fingerprint || Date.now() - previous.seen < 10000) {
+      if (
+        manual
+          ? manualStats.get(filename) !== fingerprint
+          : !previous || previous.fingerprint !== fingerprint || Date.now() - previous.seen < 10000
+      ) {
         skippedFiles.push({ filename, reason: 'Waiting for file to stop changing' });
         continue;
       }
@@ -1306,6 +1394,7 @@ async function scanMovies(manual = false) {
         const job: Job = {
           id: jobId(),
           type: 'video',
+          pathSchema: 1,
           input,
           title: path.parse(filename).name,
           sourceKey: fingerprint,
@@ -1443,7 +1532,10 @@ const errorHandler: ErrorRequestHandler = (error, req, res, next) => {
         : error.message;
   console.error(message);
   if (res.headersSent) return next(error);
-  res.status(error.status || (error.code === 'ENOENT' ? 404 : 500)).json({ error: message });
+  const status = error.status || (error.code === 'ENOENT' ? 404 : 500);
+  res.status(status).json({
+    error: status >= 500 ? 'The operation failed. Check the server log for details.' : message,
+  });
 };
 app.use(errorHandler);
 
@@ -1468,10 +1560,13 @@ async function shutdown() {
   if (stopping) return;
   stopping = true;
   clearInterval(scanTimer);
-  active?.controller.abort();
+  const draining = drainPaidWork(config.SHUTDOWN_GRACE_MS);
   for (const controller of reviewTasks.values()) controller.abort();
   uploadAbort?.abort();
   server.close();
+  console.log('Shutdown: waiting for submitted transcription responses to be saved');
+  await draining;
+  active?.controller.abort();
   const deadline = Date.now() + 15000;
   while ((pumping || uploading || scanning || reviewTasks.size) && Date.now() < deadline)
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -1481,3 +1576,14 @@ async function shutdown() {
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+
+function fatal(error: unknown) {
+  console.error('Fatal server error:', error);
+  active?.controller.abort();
+  for (const controller of reviewTasks.values()) controller.abort();
+  uploadAbort?.abort();
+  terminateChildren();
+  process.exit(1);
+}
+process.on('uncaughtException', fatal);
+process.on('unhandledRejection', fatal);

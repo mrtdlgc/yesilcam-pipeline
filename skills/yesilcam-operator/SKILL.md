@@ -34,8 +34,9 @@ second deployment beside an existing studio or alter unrelated services on the s
 Locate the application checkout or deployed image; do not assume this skill's directory is the repo.
 The project package is `yesilcam-subtitle-pipeline`; its entrypoint is `build/server.js`. The
 original development checkout is `/home/mrtdlgc/repos/yesilcam-pipeline` on the user's laptop, not
-the Oracle deployment path. No Git remote, Oracle app path, domain, or container name is established
-by this skill. Obtain those from the actual deployment/source, not a guessed GitHub URL.
+the Oracle deployment path. The Git remote is the private `mrtdlgc/yesilcam-pipeline` repository. No
+Oracle app path, domain, or container name is established by this skill. Obtain those from the
+actual deployment/source, not a guessed GitHub URL.
 
 Read the current checkout's `BATCH_OPERATIONS.md` first. For the task at hand, use `DEPLOYMENT.md`,
 `FULL_MOVIE_SCRIBE.md`, `SUBTITLE_REVIEW.md` or `TRANSCRIPTION_PROVIDERS.md`. Check `Dockerfile`,
@@ -91,7 +92,7 @@ frontend envs or rebuild after changing keys does not apply.
    `APP_PASSWORD` of at least 12 characters. Use protected configuration entry; never include the
    password in command arguments, chat or source. Keep Host and Origin intact through the proxy.
    `BASE_PATH`, if used, is forwarded without stripping it. `/health` remains at the root.
-5. Start with the Compose example's **2 CPUs, 4 GiB RAM, 256 PIDs**, 30-second stop grace and
+5. Start with the Compose example's **2 CPUs, 4 GiB RAM, 256 PIDs**, 31-minute stop grace and
    rotated logs (three 10 MB files). Apply equivalent limits for Coolify's Dockerfile build pack.
    These are initial operating caps, not measured requirements; check actual host headroom and job
    behavior.
@@ -195,8 +196,8 @@ the saved result and provider usage before retrying. Stop/cancel the affected qu
 before reconciliation. `--unlock` is only for a proven stale owner. `--allow-new-request --note ...`
 explicitly permits another potentially billed attempt: use it only when the user has authorized that
 duplicate cost after reviewing the evidence. Never delete request files to make retry work.
-`--remote-id` recovery currently supports AssemblyAI, Speechmatics and Gladia, not direct
-ElevenLabs.
+`--remote-id` recovery supports ElevenLabs transcript retrieval, AssemblyAI, Speechmatics and
+Gladia. Job Details exposes the same actions without a container shell.
 
 Codex has a separate recovery path: completed receipts and valid saved completion results are reused
 without another inference. An unknown interrupted attempt needs explicit retry and may consume more
@@ -243,11 +244,12 @@ corrections. `GET /api/reviews/ID` loads the correction document; `POST /api/rev
 the current revision and explicit cue edits. A 409 means a competing edit: preserve the draft and
 resolve it, never bypass the revision check.
 
-Screening failure retains source media and pauses the batch by default, but leaves finished
-subtitles available. `POST /api/jobs/ID/prepare-review` or **Retry screening preparation** runs only
-the handoff step; it does not repeat ASR/Codex. Resume the queue after recovery. Legacy completed
-jobs may need their original source restored. Subtitle-only jobs can use a local file for playback
-without uploading it; that selection is browser-local, while corrections still save on the server.
+Screening runs outside the ASR queue; failure retains source media without pausing the batch and
+leaves finished subtitles available. `POST /api/jobs/ID/prepare-review` or **Retry screening
+preparation** runs only the handoff step; it does not repeat ASR/Codex. Retry screening
+independently. Legacy completed jobs may need their original source restored. Subtitle-only jobs can
+use a local file for playback without uploading it; that selection is browser-local, while
+corrections still save on the server.
 
 The old Ah Nerede `?session=SESSION_ID` screenings remain compatible and keep browser-local notes.
 Export those notes before clearing browser data. New job screenings persist notes and position on

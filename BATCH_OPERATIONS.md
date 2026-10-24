@@ -17,9 +17,10 @@ processes. Set equivalent limits in Coolify's Dockerfile deployment settings. Th
 operating limits, not a measured throughput or memory guarantee. Rotate container logs; the Compose
 example keeps three 10 MB files. Do not run multiple replicas against the volume.
 
-An ARM image has **not** been built or run in this audit. Validate it on the target before loading a
-library. The image build checks the installed Codex and yt-dlp executables without signing in or
-running inference. Local source checks and fixture tests are described below.
+The private repository's CI builds and starts the cloud image on native ARM64 and x64 runners. See
+[the remediation record](AUDIT_FIXES.md#verification) for the verified revision and results.
+Validate it on the deployment target before loading a library. The image build checks the installed
+Codex and yt-dlp executables without signing in or running inference.
 
 ## Codex subscription login
 
@@ -63,8 +64,9 @@ Enable the per-film translation checkbox in Studio. For watched films, set
 Library scanning uses server defaults, not unsaved Studio form values. It verifies that required
 credentials/login are configured, waits for stable files, and deduplicates by filename, size and
 modification time. Source changes after queueing fail safely. **Scan now** performs a single scan
-even when watching is off; new files still need a second observation at least ten seconds later.
-Paused queues do not enqueue from scans. Enabling watching never resumes a paused queue.
+even when watching is off; manual scans take two observations one second apart. Automatic watching
+requires ten seconds of stability. Paused queues do not enqueue from scans. Enabling watching never
+resumes a paused queue.
 
 Identical YouTube submissions and identical translation inputs/context reuse their existing job ID.
 This includes failed jobs: inspect and retry the saved job. Deliberate new runs can use
@@ -91,8 +93,9 @@ files remain unchanged. Back up the review documents too. See
 
 New YouTube jobs retain video up to 720p for screening. Compatible video is remuxed; unsupported
 codecs use a 480p, two-thread transcode. This can add CPU time and persistent disk usage despite the
-cloud ASR route. Screening failure keeps the original media and pauses the batch by default. **Retry
-screening preparation** reruns only media/review preparation, never ASR or translation.
+cloud ASR route. Screening runs separately after subtitle completion; failure keeps the original
+media and does not pause the batch. **Retry screening preparation** reruns only media/review
+preparation, never ASR or translation.
 
 ## Costs and recovery
 
@@ -114,8 +117,9 @@ attempt needs explicit job retry. Cue IDs and timestamp strings are verified bef
 
 Back up `/data` while the service is stopped. Include the encrypted connection vault **and** its
 master key, queue, receipts, outputs, review sessions and Codex login store. Never put this backup
-in a public repository. Existing local manifests contain absolute paths; copying them to a new host
-without deliberately migrating paths does not make interrupted audio jobs portable.
+in a public repository. New manifests and request identities use paths relative to the data root.
+Legacy manifests keep their absolute paths; migrate those deliberately. Preserve source mtimes when
+copying the volume.
 
 ## First deployment check
 
@@ -133,19 +137,12 @@ without deliberately migrating paths does not make interrupted audio jobs portab
 
 The local regression suite uses fake ASR/Codex responses, isolated HTTP servers and short synthetic
 audio. It verifies request reuse, ambiguous billing, queue limits, failure/restart pauses, source
-timing preservation, receipt migration/recovery and authenticated range serving. No build, live API
-inference or Oracle deployment is part of those checks.
+timing preservation, receipt migration/recovery and authenticated range serving. CI also builds and
+smoke-tests the cloud image on native x64 and ARM64 runners. Live inference and the actual Oracle
+deployment require separate acceptance.
 
-Validation on 2026-10-24: both server and browser `npm run typecheck` checks passed; `npm test`
-passed all **46 tests** in approximately 13 seconds. Shell syntax, Compose parsing, the pinned Linux
-ARM64/x64 Codex package entries, changed-file formatting and tracked whitespace checks also passed.
-Tests ran against source in isolated temporary directories. The running localhost application was
-not rebuilt or restarted. New browser controls and the container still need deployment acceptance.
-
-The subsequent correction-handoff change passed **53 tests** and both TypeScript checks. Its
-regressions exercise automatic screening, real four-second media remux/transcode, audio-only review,
-paired timing edits, immutable generated originals, missing/omitted lines, conflicting saves,
-browser draft recovery, authenticated exports/ranges under a subpath, and persistence after
-cleanup/restart. The editor controller runs with a small DOM adapter; real-browser visual/playback
-acceptance remains manual. No local/Docker build, live inference, app restart or ARM application
-deployment was run.
+Before every redeploy, pause the queue and wait for the active job and screening worker. Set a
+31-minute container stop grace for the default 30-minute `SHUTDOWN_GRACE_MS`. Submitted ASR requests
+are drained and checkpointed before shutdown; hard kills can still leave billing uncertain. Job
+Details supports inspection, existing transcript retrieval, and an explicit replacement request with
+an operator note. No replacement request is submitted simply by opening the recovery panel.

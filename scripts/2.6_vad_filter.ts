@@ -5,8 +5,6 @@ import { readJson } from './lib/files.js';
 import { intervalsFromProfile } from './lib/audio.js';
 import { checkSileroAlignmentAvailable } from './3.5_align_silero.js';
 
-export const checkSileroAvailable = checkSileroAlignmentAvailable;
-
 // Profiles are generated AFTER Demucs and reused for alignment. Default policy
 // keeps uncertain chunks: a quiet one-second line must not be lost to a ratio gate.
 export async function filterWithSileroVAD(chunks: Chunk[], id: any, options: PipelineOptions = {}) {

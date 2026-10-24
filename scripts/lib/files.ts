@@ -93,12 +93,52 @@ export async function atomicWrite(file: string, data: string | Uint8Array): Prom
     await fs.rm(temp, { force: true });
   }
 }
+const pathFields = new Set([
+  'file',
+  'input',
+  'profileFile',
+  'originalFile',
+  '_original_file',
+  'sourceAudio',
+  'speakerContextFile',
+]);
+export function persistentPath(file: string) {
+  const relative = path.relative(DATA_ROOT, file);
+  return relative &&
+    !relative.startsWith('..' + path.sep) &&
+    relative !== '..' &&
+    !path.isAbsolute(relative)
+    ? `@data/${relative.split(path.sep).join('/')}`
+    : file;
+}
+function portableDocument(value: unknown, decode: boolean, enabled = false, key = ''): unknown {
+  if (typeof value === 'string' && enabled && pathFields.has(key)) {
+    if (!decode) return path.isAbsolute(value) ? persistentPath(value) : value;
+    if (value.startsWith('@data/')) {
+      const parts = value.slice(6).split('/');
+      parts.forEach(leaf);
+      return path.join(DATA_ROOT, ...parts);
+    }
+  }
+  if (Array.isArray(value))
+    return value.map((item) => portableDocument(item, decode, enabled, key));
+  if (value && typeof value === 'object') {
+    enabled ||= (value as { pathSchema?: number }).pathSchema === 1;
+    return Object.fromEntries(
+      Object.entries(value).map(([name, item]) => [
+        name,
+        portableDocument(item, decode, enabled, name),
+      ]),
+    );
+  }
+  return value;
+}
 export const writeJson = (file: string, value: unknown) =>
-  atomicWrite(file, JSON.stringify(value, null, 2) + '\n');
+  atomicWrite(file, JSON.stringify(portableDocument(value, false), null, 2) + '\n');
 // Persisted/provider JSON is validated by its owning subsystem before use.
 export async function readJson<T = any>(file: string, fallback?: NoInfer<T>): Promise<T> {
   try {
-    return JSON.parse(await fs.readFile(file, 'utf8'));
+    return portableDocument(JSON.parse(await fs.readFile(file, 'utf8')), true) as T;
   } catch (error) {
     if (error.code === 'ENOENT' && fallback !== undefined) return structuredClone(fallback);
     throw error;

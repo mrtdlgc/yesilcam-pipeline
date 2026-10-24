@@ -14,6 +14,8 @@ interface Session {
 const passwordFile = at('data', 'private', 'password.json');
 const sessions = new Map<string, Session>();
 const failures = new Map<string, { count: number; until: number }>();
+let verifying = 0;
+const verifyingClients = new Set<string>();
 const SESSION_MS = 12 * 60 * 60 * 1000;
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 const derive = (password: string, salt: string): Promise<Buffer> =>
@@ -80,39 +82,56 @@ export function installAuth(router: Router, origin: URL, base: string): RequestH
     router.get(`/${file}`, (req, res) => res.sendFile(at('public', file)));
   router.post('/api/auth/login', async (req, res) => {
     const now = Date.now();
-    for (const [key, value] of failures) if (value.until <= now) failures.delete(key);
+    for (const [key, value] of failures) if (value.until + 300000 <= now) failures.delete(key);
     for (const [key, value] of sessions) if (value.expires <= now) sessions.delete(key);
-    // Global cap also covers reverse proxies whose remote address is shared.
-    const keys = ['global', req.socket.remoteAddress ?? 'unknown'];
-    if (keys.some((key) => (failures.get(key)?.count ?? 0) >= (key === 'global' ? 30 : 10))) {
-      res.set('Retry-After', '60');
-      res.status(429).json({ error: 'Too many login attempts. Try again in one minute.' });
+    // Express resolves req.ip only through explicitly configured trusted proxies.
+    const key = req.ip || req.socket.remoteAddress || 'unknown';
+    const prior = failures.get(key);
+    if (prior && prior.until > now) {
+      const seconds = Math.ceil((prior.until - now) / 1000);
+      res.set('Retry-After', String(seconds));
+      res.status(429).json({ error: `Try again in ${seconds} seconds.` });
       return;
     }
-    for (const key of keys) {
-      const entry = failures.get(key) ?? { count: 0, until: now + 60000 };
-      entry.count++;
-      failures.set(key, entry);
+    if (verifying >= 4 || verifyingClients.has(key)) {
+      res.set('Retry-After', '1');
+      res.status(429).json({ error: 'Sign-in is busy. Try again shortly.' });
+      return;
     }
-    await serialized(passwordFile, async () => {
-      if (!(await verify(req.body?.password))) {
-        res.status(401).json({ error: 'Incorrect password' });
-        return;
-      }
-      sessions.delete(token(req));
-      if (sessions.size >= 100) sessions.delete(sessions.keys().next().value!);
-      const value = randomBytes(32).toString('hex');
-      sessions.set(sha(value), { created: now, expires: now + SESSION_MS });
-      res.cookie(name, value, { ...cookieOptions, maxAge: SESSION_MS });
-      res.json({ success: true });
-    });
+    verifying++;
+    verifyingClients.add(key);
+    try {
+      await serialized(passwordFile, async () => {
+        if (!(await verify(req.body?.password))) {
+          const count = (prior?.count ?? 0) + 1;
+          if (failures.size >= 10000) failures.delete(failures.keys().next().value!);
+          failures.set(key, {
+            count,
+            until:
+              Date.now() + (count < 5 ? 0 : Math.min(60000, 1000 * 2 ** Math.min(6, count - 5))),
+          });
+          res.status(401).json({ error: 'Incorrect password' });
+          return;
+        }
+        failures.delete(key);
+        sessions.delete(token(req));
+        if (sessions.size >= 100) sessions.delete(sessions.keys().next().value!);
+        const value = randomBytes(32).toString('hex');
+        sessions.set(sha(value), { created: now, expires: now + SESSION_MS });
+        res.cookie(name, value, { ...cookieOptions, maxAge: SESSION_MS });
+        res.json({ success: true });
+      });
+    } finally {
+      verifying--;
+      verifyingClients.delete(key);
+    }
   });
   const gate: RequestHandler = (req, res, next) => {
     if (authenticated(req)) {
       next();
       return;
     }
-    if (req.method === 'GET' && (req.path === '/' || req.path === '/index.html')) {
+    if (req.method === 'GET' && (req.path === '/' || req.path.endsWith('.html'))) {
       res.redirect(`${base}/login`);
       return;
     }

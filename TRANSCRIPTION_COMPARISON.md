@@ -6,10 +6,11 @@ original/vocal pairs. That limited run does not validate every provider or rank 
 ## 1. Prepare representative audio once
 
 Use an existing job whose temp/JOB_ID/manifest.json and prepared audio chunks remain on disk.
-PAUSE_BEFORE_TRANSCRIPTION=true lets a new job stop after source chunking. Choose IDs from that
-manifest: quiet dialogue, loud music under speech, hiss/crackle, shouting, overlapping speakers,
-names/slang and genuine silence. Five to ten short chunks are a better first comparison than an
-entire film. Do not clean intermediates until the comparisons are finished.
+**Pause before transcription** in Studio (or `PAUSE_BEFORE_TRANSCRIPTION: true` in `config.ts`) lets
+a new job stop after source chunking. Choose IDs from that manifest: quiet dialogue, loud music
+under speech, hiss/crackle, shouting, overlapping speakers, names/slang and genuine silence. Five to
+ten short chunks are a better first comparison than an entire film. Do not clean intermediates until
+the comparisons are finished.
 
 The CLI requires the original audioStat and checks each retained file's size and mtime. Cloud
 request checkpoints additionally bind the actual audio SHA-256. It does not download a film, run
@@ -31,8 +32,8 @@ Small 3. Copy/edit the matrix and pass --matrix my-matrix.json to choose fewer/d
 provider names from [TRANSCRIPTION_PROVIDERS.md](TRANSCRIPTION_PROVIDERS.md).
 
 output/comparisons/first-pass/ contains plan.json, reference.template.json and manual.template.json.
-The plan includes exact prepared WAV paths, original film offsets, each provider's gross price
-estimate and separate currency totals. No keys are needed to create the plan. WAV files are not
+The plan includes exact prepared audio paths, original film offsets, each provider's gross price
+estimate and separate currency totals. No keys are needed to create the plan. Audio files are not
 re-encoded or uploaded.
 
 ## 3. Create a corrected reference
@@ -94,7 +95,7 @@ additionally gets a token-based estimate. No cross-currency total is presented a
 
 ## 6. Compare a subscription web app without an API call
 
-Use the exact WAV paths listed in plan.json with a supported upload interface. Request verbatim
+Use the exact audio paths listed in plan.json with a supported upload interface. Request verbatim
 Turkish, with no translation or rewriting. Copy manual.template.json, give it a simple label and
 model name, and replace each null with that chunk's transcript. Then:
 
@@ -153,3 +154,9 @@ new job, not this tool.
   film offsets survive; no API call during import/planning.
 - Run the existing [MANUAL_CHECKS.md](MANUAL_CHECKS.md) for separation, alignment, queue, recovery
   and translation after the cloud sample comparison passes.
+
+Job Details now offers the same request inspection/reconciliation controls as the CLI. Existing
+ElevenLabs transcript IDs are retrieved with GET, without another audio submission. Async/webhook
+submission is available upstream, but this app retains synchronous submissions plus retrieval; no
+unverified webhook receiver is exposed. See the
+[official retrieval endpoint](https://elevenlabs.io/docs/api-reference/speech-to-text/get).

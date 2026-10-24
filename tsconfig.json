@@ -12,8 +12,8 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "types": ["node"],
-    "lib": ["ES2023", "DOM", "DOM.Iterable"]
+    "lib": ["ES2023"]
   },
   "include": ["config.ts", "server.ts", "scripts/**/*.ts", "types/**/*.ts"],
-  "exclude": ["build", "node_modules", "public"]
+  "exclude": ["build", "node_modules", "public", "scripts/tests"]
 }

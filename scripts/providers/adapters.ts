@@ -133,16 +133,24 @@ async function deepgram(ctx: CloudContext) {
 }
 
 async function elevenlabs(ctx: CloudContext) {
-  const r = await ctx.submit('https://api.elevenlabs.io/v1/speech-to-text', {
-    headers: { 'xi-api-key': ctx.key! },
-    body: form(ctx, {
-      model_id: ctx.selected.model.id,
-      language_code: ctx.language === 'auto' ? undefined : ctx.language,
-      timestamps_granularity: 'word',
-      tag_audio_events: false,
-      diarize: scribeDiarization(ctx.settings),
-    }),
-  });
+  const r = ctx.state.remoteId
+    ? await ctx.request(
+        `https://api.elevenlabs.io/v1/speech-to-text/transcripts/${encodeURIComponent(ctx.state.remoteId)}`,
+        {
+          headers: { 'xi-api-key': ctx.key! },
+        },
+      )
+    : await ctx.submit('https://api.elevenlabs.io/v1/speech-to-text', {
+        headers: { 'xi-api-key': ctx.key! },
+        body: form(ctx, {
+          model_id: ctx.selected.model.id,
+          language_code: ctx.language === 'auto' ? undefined : ctx.language,
+          timestamps_granularity: 'word',
+          tag_audio_events: false,
+          diarize: scribeDiarization(ctx.settings),
+        }),
+      });
+  if (r.transcription_id) await ctx.save({ remoteId: r.transcription_id });
   return {
     ...r,
     language: r.language_code,

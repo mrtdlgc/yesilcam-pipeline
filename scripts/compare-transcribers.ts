@@ -1,3 +1,4 @@
+import { acquireProcessLock } from './lib/process-identity.js';
 import { credential } from './lib/credentials.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -110,17 +111,7 @@ if (args.run) {
 const dir = at('output', 'comparisons', args.name);
 await fs.mkdir(dir, { recursive: true });
 const lockFile = path.join(dir, 'run.lock');
-let lock;
-try {
-  lock = await fs.open(lockFile, 'wx', 0o600);
-  await lock.writeFile(String(process.pid));
-} catch (error) {
-  if (error.code === 'EEXIST')
-    throw new Error(
-      'Comparison lock exists; stop the other run or remove a stale run.lock after checking its PID',
-    );
-  throw error;
-}
+const release = await acquireProcessLock(lockFile);
 const controller = new AbortController();
 const cancel = () => controller.abort();
 process.once('SIGINT', cancel);
@@ -307,8 +298,7 @@ try {
     });
   console.log(`Comparison files: ${dir}`);
 } finally {
-  await lock?.close();
-  await fs.rm(lockFile, { force: true });
+  await release();
   process.removeListener('SIGINT', cancel);
   process.removeListener('SIGTERM', cancel);
 }

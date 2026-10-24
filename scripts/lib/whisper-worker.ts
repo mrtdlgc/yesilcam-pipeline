@@ -11,6 +11,7 @@ import {
   terminate,
   abortError,
   checkAbort,
+  trackChild,
 } from './process.js';
 
 // Owned by one job, with one in-flight request and explicit correlation IDs.
@@ -40,12 +41,14 @@ export class WhisperWorker {
   async start() {
     checkAbort(this.signal);
     if (this.child) throw new Error('Worker already started');
-    const child = (this.child = spawn(WHISPER_PYTHON(), [at('scripts', 'whisper_worker.py')], {
-      shell: false,
-      detached: process.platform !== 'win32',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: childEnvironment(whisperEnv(this.settings)),
-    }));
+    const child = (this.child = trackChild(
+      spawn(WHISPER_PYTHON(), [at('scripts', 'whisper_worker.py')], {
+        shell: false,
+        detached: process.platform !== 'win32',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: childEnvironment(whisperEnv(this.settings)),
+      }),
+    ));
     this.exit = new Promise<void>((resolve) => child.once('close', () => resolve()));
     child.stdin.on('error', (error) => this.fail(error));
     child.stderr.on('data', (data) => process.stderr.write(data));

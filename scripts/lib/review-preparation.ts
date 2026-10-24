@@ -1,8 +1,9 @@
+import type { Manifest } from '../../types/checkpoints.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Job, PipelineOptions } from '../../types/pipeline.js';
 import { config } from '../../config.js';
-import { at, contained, jobId, readJson, serialized, writeJson } from './files.js';
+import { at, contained, persistentPath, jobId, readJson, serialized, writeJson } from './files.js';
 import { probe, run, checkAbort } from './process.js';
 import { withTempBudget } from './storage.js';
 import { subtitleHash } from './speakers.js';
@@ -41,7 +42,12 @@ export async function prepareReviewMedia(input: string, id: string, options: Pip
   await fs.mkdir(cacheRoot, { recursive: true });
   const cacheFile = await contained(cacheRoot, `${id}.json`);
   const identity = subtitleHash(
-    JSON.stringify([input, before.size, before.mtimeMs, settings.AUDIO_STREAM_INDEX]),
+    JSON.stringify([
+      persistentPath(input),
+      before.size,
+      before.mtimeMs,
+      settings.AUDIO_STREAM_INDEX,
+    ]),
   );
   const cached = await readJson(cacheFile, null);
   if (cached?.identity === identity) {
@@ -131,7 +137,8 @@ export async function prepareReviewMedia(input: string, id: string, options: Pip
         args.push('-fs', settings.MAX_UPLOAD_BYTES, '-progress', 'pipe:1', '-nostats', staging);
         await run('ffmpeg', args, {
           signal: options.signal,
-          timeout: settings.MEDIA_TIMEOUT_MS,
+          timeout: Math.max(settings.MEDIA_TIMEOUT_MS, Math.ceil(info.duration * 3000 + 60000)),
+          priority: 10,
           onStdout(chunk) {
             buffer += chunk.toString();
             let end: number;
@@ -159,7 +166,14 @@ export async function prepareReviewMedia(input: string, id: string, options: Pip
         if (current.size !== before.size || current.mtimeMs !== before.mtimeMs)
           throw new Error('Source changed while preparing review media');
         const prepared = await probe(staging, { signal: options.signal });
-        if (Math.abs(prepared.duration - info.duration) > 1)
+        const mappedDurations = [video, audio]
+          .filter(Boolean)
+          .map((stream) => Number(stream.duration))
+          .filter((duration) => Number.isFinite(duration) && duration > 0);
+        const expectedDuration = mappedDurations.length
+          ? Math.max(...mappedDurations)
+          : info.duration;
+        if (Math.abs(prepared.duration - expectedDuration) > Math.max(1, expectedDuration * 0.001))
           throw new Error('Screening copy is incomplete or its duration changed');
         const stat = await fs.stat(staging);
         if (!stat.size || stat.size > settings.MAX_UPLOAD_BYTES)
@@ -192,9 +206,10 @@ export async function prepareSubtitleReview(
       if (error.code === 'ENOENT') return null;
       throw error;
     });
-    if (existing) return screeningLinks(job.id, existing.languages, existing.targetLanguage);
+    if (existing?.media || (existing && job.type === 'translation' && !sourceJob))
+      return screeningLinks(job.id, existing.languages, existing.targetLanguage);
     const settings = { ...config, ...job.settings };
-    const manifest = await readJson(at('temp', job.id, 'manifest.json'), null);
+    const manifest = await readJson<Manifest | null>(at('temp', job.id, 'manifest.json'), null);
     const source = await fs.readFile(
       result.subtitleFile ? await outputFile(result.subtitleFile) : job.input!,
       'utf8',
@@ -248,7 +263,9 @@ export async function prepareSubtitleReview(
       }))
     )
       input = undefined;
+    let downloaded = false;
     if (!input && job.youtubeUrl) {
+      downloaded = true;
       input = await withTempBudget(
         settings.MAX_UPLOAD_BYTES,
         () =>
@@ -269,7 +286,7 @@ export async function prepareSubtitleReview(
         job.type === 'translation'
           ? sourceManifest?.sourceStat || sourceJob?.sourceStat
           : manifest?.sourceStat || job.sourceStat;
-      if (pinned && !inherited?.media) {
+      if (pinned && !inherited?.media && !downloaded) {
         const stat = await fs.stat(input);
         if (stat.size !== pinned.size || stat.mtimeMs !== pinned.mtimeMs)
           throw new Error('Review source no longer matches the transcribed film');
@@ -287,6 +304,12 @@ export async function prepareSubtitleReview(
       throw new Error(
         'Source media is missing. Restore the original file and prepare the screening again.',
       );
+    // Screening media is durable now; the re-download is never a resume checkpoint.
+    const downloadDir = at('temp', job.id, 'review-download');
+    await fs.rm(downloadDir, { recursive: true, force: true });
+    await fs.rmdir(at('temp', job.id)).catch((error) => {
+      if (!['ENOENT', 'ENOTEMPTY'].includes(error.code)) throw error;
+    });
     const document = await createSubtitleReview({
       id: job.id,
       title: job.title,

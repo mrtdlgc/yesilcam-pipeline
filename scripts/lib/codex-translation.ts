@@ -1,3 +1,4 @@
+import type { CodexReceipt } from '../../types/checkpoints.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -232,7 +233,7 @@ export async function translateWithCodex(
   const signature = signatureFor(promptVersion);
   const receiptFile = path.join(receiptDir, 'codex-receipt.json');
   const candidateFile = path.join(receiptDir, 'codex-result.srt');
-  let receipt = await readJson(receiptFile, null);
+  let receipt = await readJson<CodexReceipt | null>(receiptFile, null);
   // Older prompt versions still prove the same source/context/model identity.
   // Reuse completed work; an unknown interrupted attempt still needs explicit retry.
   const matchingLegacy = [1, 2, 3].some((version) => receipt?.signature === signatureFor(version));
@@ -300,7 +301,7 @@ export async function translateWithCodex(
         completed = true;
         usage = value.usage ?? null;
         eventWrites = eventWrites.then(async () => {
-          Object.assign(receipt, { turnCompleted: true, usage });
+          Object.assign(receipt!, { turnCompleted: true, usage });
           await writeJson(receiptFile, receipt);
         });
       }
@@ -308,7 +309,7 @@ export async function translateWithCodex(
         failed = true;
         failureMessage = String(value.error?.message ?? value.message ?? '').slice(0, 2000);
         eventWrites = eventWrites.then(async () => {
-          receipt.turnFailed = true;
+          receipt!.turnFailed = true;
           await writeJson(receiptFile, receipt);
         });
       }
@@ -320,10 +321,11 @@ export async function translateWithCodex(
       if (reporting) return;
       reporting = true;
       Promise.resolve(
-        progress?.(
-          10,
-          `Codex is working on the complete subtitle file · ${Math.floor((Date.now() - started) / 1000)}s elapsed`,
-        ),
+        options.onStage?.({
+          id: 'translation',
+          percentage: null,
+          detail: `Codex is working on the complete subtitle file · ${Math.floor((Date.now() - started) / 1000)}s elapsed`,
+        }),
       )
         .catch(() => {})
         .finally(() => {

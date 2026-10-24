@@ -7,18 +7,17 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { config } from '../config.js';
-import { at, jobId as validateId, readJson, writeJson } from './lib/files.js';
+import { at, persistentPath, jobId as validateId, readJson, writeJson } from './lib/files.js';
 import { WHISPER_PYTHON, whisperEnv, run, checkAbort } from './lib/process.js';
 import { cloudPlan, checkCloudPlan, transcribeCloud, usageReport } from './providers/client.js';
 import { WhisperWorker } from './lib/whisper-worker.js';
 import { fullMovie, scribeDiarization } from './lib/transcription-mode.js';
-export { formatTimestamp as formatSRTTime, segmentsToSrt } from './lib/srt.js';
 
 export function buildSandwichPrompt(
   movieContext: Record<string, any> = {},
   previousSentence: string | null = null,
 ) {
-  if (!previousSentence || /\uFFFD|Ã.|Â.|Р[°-я]/u.test(previousSentence)) return null;
+  if (!previousSentence || /\uFFFD/u.test(previousSentence)) return null;
   return previousSentence.trim().slice(-250);
 }
 
@@ -31,18 +30,18 @@ function validateResponse(response: any, chunk: Chunk) {
       if (
         !Number.isFinite(segment.start) ||
         !Number.isFinite(segment.end) ||
-        segment.start < 0 ||
-        segment.end <= segment.start ||
-        segment.end > duration + 0.25 ||
         typeof segment.text !== 'string'
       ) {
         throw new Error(`Invalid transcription timestamps in chunk ${chunk.id}`);
       }
-      const end = Math.min(segment.end, duration);
-      if (end <= segment.start) throw new Error(`Transcription cue exceeds chunk ${chunk.id}`);
+      const start = Math.max(0, Math.min(segment.start, duration - 0.001));
+      const end = Math.min(duration, Math.max(start + 0.001, segment.end));
+      const repaired = start !== segment.start || end !== segment.end;
       return {
         ...segment,
+        start,
         end,
+        review: [...(segment.review ?? []), ...(repaired ? ['timestamp_repaired'] : [])],
         text: segment.text
           .trim()
           .replace(/\r\n?/g, '\n')
@@ -61,7 +60,11 @@ export async function transcribeChunksToSegments(
   options: PipelineOptions = {},
 ) {
   validateId(id);
-  const settings = { ...config, ...options.settings };
+  const settings = {
+    ...config,
+    ...options.settings,
+    PORTABLE_PATHS: options.settings?.PORTABLE_PATHS === true,
+  };
   const movie = fullMovie(settings);
   if (movie && (chunks.length !== 1 || chunks[0].startTime !== 0))
     throw new Error('Full-movie transcription requires one continuous audio file starting at zero');
@@ -102,7 +105,7 @@ export async function transcribeChunksToSegments(
         settings: inferenceSettings,
         chunks: chunks.map(({ id, file, startTime, endTime, audioStat }: Record<string, any>) => ({
           id,
-          file,
+          file: settings.PORTABLE_PATHS ? persistentPath(file) : file,
           startTime,
           endTime,
           audioStat,
@@ -313,24 +316,4 @@ export function offsetSegment(segment: Segment, offset: number): Segment {
       : {}),
     _filmOffset: offset,
   };
-}
-
-export async function transcribeToSegments(
-  file: string,
-  language: string,
-  id: any,
-  chunkIndex = 0,
-  prompt: string | null = null,
-  movieContext: Record<string, any> = {},
-  options: PipelineOptions = {},
-) {
-  const { probe } = await import('./lib/process.js');
-  const { duration } = await probe(file, { signal: options.signal });
-  return transcribeChunksToSegments(
-    [{ id: chunkIndex ?? 0, file, startTime: 0, endTime: duration }],
-    language,
-    id,
-    movieContext,
-    options,
-  );
 }

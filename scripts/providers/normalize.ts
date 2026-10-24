@@ -22,7 +22,7 @@ export function segmentsFromWords(words: any, timing = 'native_word', duration =
     const review = [...new Set(current.flatMap((w) => w.review ?? []))] as string[];
     // Retain the native zero-duration word; only its display cue gets a flagged
     // 1 ms interval if no neighboring words provide a usable interval.
-    if (end <= start) {
+    if (Math.round(end * 1000) <= Math.round(start * 1000)) {
       end = Math.min(duration, start + 0.001);
       if (end <= start) start = Math.max(0, end - 0.001);
       review.push('estimated_zero_duration_cue');
@@ -119,6 +119,12 @@ export async function normalize(
   if (typeof result.text !== 'string')
     throw new Error('Provider returned no transcript text; retained response needs inspection');
   let segments;
+  if (
+    result.words !== undefined &&
+    (!Array.isArray(result.words) ||
+      result.words.some((w: any) => !w || typeof (w.word ?? w.text) !== 'string'))
+  )
+    throw new Error('Provider returned malformed word text');
   const words = result.words
     ?.filter((w: any) => typeof (w.word ?? w.text) === 'string' && (w.word ?? w.text).trim())
     .map((w: any) => {
@@ -137,31 +143,28 @@ export async function normalize(
       };
     });
   if (words?.length) {
-    // Invalid native timestamps are evidence, not permission to silently charge
-    // for a second inference or to replace them with invented alignment.
-    for (let i = 0; i < words.length; i++) {
-      const w = words[i];
-      if (
-        !Number.isFinite(w.start) ||
-        !Number.isFinite(w.end) ||
-        w.start < 0 ||
-        (scribe ? w.end < w.start : w.end <= w.start) ||
-        w.end > duration + 0.25 ||
-        (i > 0 && w.start < words[i - 1].start)
-      )
-        throw new Error('Provider returned invalid word timestamps');
-      w.end = Math.min(w.end, duration);
-      if (w.end < w.start || (!scribe && w.end === w.start))
-        throw new Error('Word exceeds chunk duration');
-      if (scribe)
-        w.review = [
-          ...(w.end === w.start ? ['zero_duration_word'] : []),
-          ...(w.end - w.start > 2 ? ['unusually_long_word'] : []),
-          ...(scribeDiarization(settings) && w.speaker === undefined
-            ? ['speaker_label_missing']
-            : []),
-        ];
+    let previousStart = -Infinity;
+    for (const w of words) {
+      if (!Number.isFinite(w.start) || !Number.isFinite(w.end))
+        throw new Error('Provider returned non-numeric word timestamps');
+      const originalStart = w.start,
+        originalEnd = w.end;
+      w.start = Math.min(duration, Math.max(0, w.start));
+      w.end = Math.min(duration, Math.max(w.start, w.end));
+      const repaired =
+        originalStart !== w.start || originalEnd !== w.end || w.start < previousStart;
+      previousStart = w.start;
+      w.review = [
+        ...(w.review ?? []),
+        ...(repaired ? ['timestamp_repaired'] : []),
+        ...(w.end === w.start ? ['zero_duration_word'] : []),
+        ...(w.end - w.start > 2 ? ['unusually_long_word'] : []),
+        ...(scribe && scribeDiarization(settings) && w.speaker === undefined
+          ? ['speaker_label_missing']
+          : []),
+      ];
     }
+    words.sort((a: Word, b: Word) => a.start - b.start);
   }
   if (scribe && words?.length) {
     // A provider can wrap a whole movie in one segment. Preserve actual word

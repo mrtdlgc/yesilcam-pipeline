@@ -6,18 +6,19 @@ import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { after, test } from 'node:test';
-import {
+
+const root = await fs.mkdtemp(path.join(os.tmpdir(), 'yesilcam-codex-test-'));
+process.env.DATA_DIR = root;
+const {
   codexArgs,
   codexPrompt,
   codexStatus,
   subtitleDocument,
   translateWithCodex,
   validateCodexTranslation,
-} from '../lib/codex-translation.js';
-import { childEnvironment } from '../lib/process.js';
-import { subtitleHash } from '../lib/speakers.js';
-
-const root = await fs.mkdtemp(path.join(os.tmpdir(), 'yesilcam-codex-test-'));
+} = await import('../lib/codex-translation.js');
+const { childEnvironment } = await import('../lib/process.js');
+const { subtitleHash } = await import('../lib/speakers.js');
 after(() => fs.rm(root, { recursive: true, force: true }));
 const source =
   '\uFEFF001\r\n00:00:01,000  -->  00:00:02,500\r\n<i>Merhaba!</i>\r\n\r\n7\r\n00:00:02.000 --> 00:00:04.000\r\nNasılsın?\r\n';

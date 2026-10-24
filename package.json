@@ -1,19 +1,20 @@
 {
   "name": "yesilcam-subtitle-pipeline",
   "version": "2.0.0",
-  "description": "Automated subtitle generation pipeline for Yeşilçam films",
+  "description": "Automated subtitle generation pipeline for Ye\u015fil\u00e7am films",
   "main": "build/server.js",
   "type": "module",
   "scripts": {
     "start": "node build/server.js",
-    "dev": "npm run build && node --watch build/server.js",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.browser.json",
+    "dev": "node --watch --watch-path=config.ts --watch-path=server.ts --watch-path=scripts --watch-path=public scripts/dev.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.browser.json && tsc --noEmit -p tsconfig.tests.json",
     "test": "node --import tsx --test --test-concurrency=1 scripts/tests/*.test.ts",
-    "build": "tsc -p tsconfig.json && tsc -p tsconfig.browser.json && node build/scripts/copy-assets.js",
+    "build": "rm -rf build && tsc -p tsconfig.build.json && tsc -p tsconfig.browser.json && node build/scripts/copy-assets.js",
     "compare:transcription": "tsx scripts/compare-transcribers.ts",
     "recover:transcription": "tsx scripts/reconcile-transcription.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "docs:providers": "tsx scripts/generate-provider-docs.ts"
   },
   "keywords": [
     "subtitles",

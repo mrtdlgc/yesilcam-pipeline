@@ -17,22 +17,22 @@ export function cleanSegments(segments: Segment[], options: PipelineOptions = {}
     .sort((a: any, b: any) => a.start - b.start || a.end - b.end);
   for (let index = 0; index < result.length; index++) {
     let segment = result[index];
-    if (
-      !Number.isFinite(segment.start) ||
-      !Number.isFinite(segment.end) ||
-      segment.end <= segment.start
-    ) {
+    if (!Number.isFinite(segment.start) || !Number.isFinite(segment.end)) {
       throw new Error('Cannot export invalid subtitle timing; inspect raw transcription');
     }
+    if (segment.end <= segment.start)
+      segment = addReview({ ...segment, end: segment.start + 1 }, 'timestamp_repaired');
     const previous = result[index - 1];
     if (previous && previous.end > segment.start) {
       // Split the overlap once, never stretch later cues and create a second overlap.
       const earliest = previous.start + 1,
         latest = segment.end - 1;
-      if (earliest > latest)
-        throw new Error('Cues cannot fit on the millisecond timeline; manual repair required');
+      if (earliest > latest) {
+        segment.end = earliest + 1;
+        segment = addReview(segment, 'timestamp_repaired');
+      }
       const boundary = Math.min(
-        latest,
+        Math.max(latest, earliest),
         Math.max(earliest, Math.round((previous.end + segment.start) / 2)),
       );
       previous.end = boundary;

@@ -8,6 +8,7 @@ function $<T extends HTMLElement = HTMLElement>(id: string): T {
 let selectedJobId: string | null = null,
   refreshing = false;
 let providersReady = false;
+let translationOffset = 0;
 let jobOffset = 0,
   queuePaused = false,
   scannerEnabled = false;
@@ -28,12 +29,16 @@ function button(text: string, action: () => unknown, className = 'btn-small btn-
   node.type = 'button';
   node.addEventListener('click', (event) => {
     event.stopPropagation();
+    const wasDisabled = node.disabled;
+    if (wasDisabled) return;
     node.disabled = true;
+    node.dataset.busy = 'true';
     Promise.resolve()
       .then(action)
       .catch((error) => notice(error.message))
       .finally(() => {
-        node.disabled = false;
+        delete node.dataset.busy;
+        node.disabled = wasDisabled;
       });
   });
   return node;
@@ -53,11 +58,26 @@ function download(text: string, url: string) {
   node.download = '';
   return node;
 }
+const readCache = new Map<string, { at: number; data: unknown }>();
+async function occasional(url: string) {
+  const cached = readCache.get(url);
+  if (cached && Date.now() - cached.at < 30000) return cached.data as any;
+  const data = await request(url);
+  readCache.set(url, { at: Date.now(), data });
+  return data;
+}
+const responseCache = new Map<string, { etag: string; data: unknown }>();
 async function request(url: string, options: RequestInit = {}): Promise<any> {
+  const cached = !options.method || options.method === 'GET' ? responseCache.get(url) : undefined;
+  if (options.method && options.method !== 'GET') {
+    responseCache.clear();
+    readCache.clear();
+  }
   const response = await fetch(`${BASE}${url}`, {
     ...options,
     headers: {
       'X-Yesilcam-Request': '1',
+      ...(cached ? { 'If-None-Match': cached.etag } : {}),
       ...(options.body ? { 'Content-Type': 'application/json' } : {}),
       ...options.headers,
     },
@@ -66,10 +86,16 @@ async function request(url: string, options: RequestInit = {}): Promise<any> {
     window.location.assign(`${BASE}/login`);
     throw new Error('Session expired. Sign in again.');
   }
+  if (response.status === 304 && cached) return cached.data;
   const data = await response.json().catch(() => {
     throw new Error(`Server returned an unreadable response (${response.status})`);
   });
   if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  const etag = response.headers.get('etag');
+  if (etag && (!options.method || options.method === 'GET')) {
+    if (responseCache.size >= 100) responseCache.delete(responseCache.keys().next().value!);
+    responseCache.set(url, { etag, data });
+  }
   return data;
 }
 const post = (url: string, data?: unknown) =>
@@ -132,6 +158,13 @@ function showProviderDetails(reset = false) {
   );
   if (!p) return;
   $('cloudControls').hidden = p.id === 'local';
+  const ageDays = Math.floor(
+    (Date.now() - Date.parse(providerCatalog?.checkedAt || '')) / 86400000,
+  );
+  $('pricingWarning').textContent =
+    ageDays > 30
+      ? `Prices were checked ${ageDays} days ago. Verify your provider rate and enter a current quote before submitting.`
+      : '';
   if (reset) {
     $<HTMLInputElement>('transcriptionModel').value = p.defaultModel;
     $<HTMLInputElement>('pricePerMinute').value = '';
@@ -278,8 +311,17 @@ function updateJobLive(job: JobView) {
   );
 }
 
+const jobListSignatures = new Map<string, string>();
 function renderJobs(jobs: JobView[], container = 'jobsList') {
   const list = $(container);
+  const signature = JSON.stringify(jobs);
+  if (
+    jobListSignatures.get(container) === signature ||
+    list.contains(document.activeElement) ||
+    list.querySelector('[data-busy]')
+  )
+    return;
+  jobListSignatures.set(container, signature);
   list.replaceChildren();
   if (!jobs.length)
     return empty(
@@ -327,9 +369,10 @@ function renderJobs(jobs: JobView[], container = 'jobsList') {
         const link = element('a', 'Watch & correct', 'btn-small btn-primary');
         link.href = `${BASE}/review-player.html?job=${encodeURIComponent(job.id)}`;
         card.append(link);
-      } else if (result?.reviewStatus === 'preparing')
+      }
+      if (result?.reviewStatus === 'preparing')
         card.append(element('p', 'Preparing screening…', 'field-note'));
-      else
+      else if (!result?.reviewUrl || result?.reviewStatus === 'removed')
         card.append(
           button(
             result?.reviewError ? 'Retry screening preparation' : 'Prepare screening',
@@ -427,6 +470,83 @@ async function showJob(id: string) {
       }),
     );
   }
+  if (['failed', 'interrupted', 'cancelled', 'paused'].includes(job.status)) {
+    const { requests } = await request(`/api/jobs/${encodeURIComponent(id)}/requests`);
+    for (const entry of requests.filter((entry: { status: string }) =>
+      ['uncertain', 'submitting', 'accepted'].includes(entry.status),
+    )) {
+      const panel = element('div', null, 'review-cues');
+      panel.append(
+        element(
+          'p',
+          `${entry.provider} / ${entry.model}, chunk ${entry.chunkId}: ${entry.status}. This request may already have been billed. Request ID: ${entry.requestId || 'unavailable'}.`,
+        ),
+      );
+      if (['elevenlabs', 'assemblyai', 'speechmatics', 'gladia'].includes(entry.provider)) {
+        const label = element('label', 'Existing provider transcript/job ID ');
+        const remote = element('input');
+        remote.value = entry.remoteId || '';
+        label.append(remote);
+        panel.append(label);
+        panel.append(
+          button('Use existing transcript', async () => {
+            await post(`/api/jobs/${encodeURIComponent(id)}/reconcile`, {
+              chunkId: String(entry.chunkId),
+              remoteId: remote.value.trim(),
+            });
+            await showJob(id);
+            notice(
+              'Existing transcript attached. Retry to retrieve it without resubmitting audio.',
+              true,
+            );
+          }),
+        );
+      }
+      const noteLabel = element('label', 'Reason for authorizing another paid attempt ');
+      const note = element('textarea');
+      noteLabel.append(note);
+      panel.append(noteLabel);
+      panel.append(
+        button(
+          'Authorize a new paid attempt',
+          async () => {
+            if (!note.value.trim())
+              throw new Error('Record what you checked in the provider dashboard first.');
+            if (
+              !confirm(
+                'A new attempt can charge again. Prior billing evidence will be retained. Continue?',
+              )
+            )
+              return;
+            await post(`/api/jobs/${encodeURIComponent(id)}/reconcile`, {
+              chunkId: String(entry.chunkId),
+              allowNewRequest: true,
+              note: note.value,
+            });
+            await showJob(id);
+          },
+          'btn-small btn-warning',
+        ),
+      );
+      details.append(panel);
+    }
+  }
+  if (job.screeningBytes > 0 && job.status === 'completed')
+    details.append(
+      button(
+        `Remove screening copy (${(job.screeningBytes / 1024 ** 3).toFixed(2)} GiB)`,
+        async () => {
+          if (
+            !confirm(
+              'Remove the screening video to free space? Subtitle corrections and generated originals are preserved.',
+            )
+          )
+            return;
+          await post(`/api/jobs/${encodeURIComponent(id)}/remove-screening`);
+          await showJob(id);
+        },
+      ),
+    );
   if (job.youtubeUrl) details.append(element('p', job.youtubeUrl));
   const result = job.result || {};
   if (result.reviewUrl) {
@@ -562,7 +682,7 @@ async function showJob(id: string) {
   }
   if (result.speakerFile)
     details.append(download('Speaker annotations for translation', result.speakerFile));
-  if (['completed', 'failed', 'cancelled'].includes(job.status) && !job.intermediatesRemoved) {
+  if (['completed', 'failed', 'cancelled'].includes(job.status) && job.hasIntermediates) {
     details.append(
       button('Remove intermediate audio', async () => {
         if (
@@ -720,6 +840,8 @@ function initializeCodexTranslations() {
     $('codexStatus').textContent = error.message;
   });
   $('refreshTranslationsBtn').addEventListener('click', () => {
+    readCache.clear();
+    void refresh();
     void loadCodexStatus().catch((error) => notice(error.message));
   });
   $('translationSource').addEventListener('change', () => {
@@ -751,10 +873,13 @@ function initializeCodexTranslations() {
         if (!file.size || file.size > 1024 * 1024)
           throw new Error('Subtitle files must be between 1 byte and 1 MB');
         const bytes = await file.arrayBuffer();
+        const encoding = $<HTMLSelectElement>('subtitleEncoding').value;
         try {
-          content = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+          content = new TextDecoder(encoding, { fatal: true }).decode(bytes);
         } catch {
-          content = new TextDecoder('windows-1254', { fatal: true }).decode(bytes);
+          throw new Error(
+            'The subtitle does not use the selected encoding. Choose its encoding before translating.',
+          );
         }
       }
       const result = await post('/api/subtitle-translations', {
@@ -873,7 +998,7 @@ function renderStatus(status: StatusView, found: { filename: string }[]) {
     : `One film runs at a time · ${status.queue.pendingJobs}/${status.queue.maxQueuedJobs} waiting. Pausing lets the current job finish.`;
   const gib = (bytes: number) => (bytes / 1024 ** 3).toFixed(1);
   $('storageStatus').textContent =
-    `${gib(status.storage.temporaryBytes)} / ${gib(status.storage.maxTemporaryBytes)} GiB temporary media · ${gib(status.storage.availableBytes)} GiB disk available`;
+    `${gib(status.storage.temporaryBytes)} / ${gib(status.storage.maxTemporaryBytes)} GiB temporary media · ${gib(status.storage.availableBytes)} GiB disk available · ${gib(status.storage.screeningBytes || 0)} GiB screenings · ${gib(status.storage.transcriptBytes || 0)} GiB provider transcripts`;
   $('scannerStatus').textContent =
     status.scanner.error || (status.scanner.active ? 'Watching movies/' : 'Stopped');
   $('statTotalFiles').textContent = String(status.scanner.totalFiles);
@@ -908,34 +1033,57 @@ async function refresh() {
   if (refreshing) return;
   refreshing = true;
   try {
-    const [jobs, folders, paused, status, found, subtitles] = await Promise.all([
-      request(`/api/jobs?view=summary&limit=${jobPageSize}&offset=${jobOffset}`),
-      request('/api/translations'),
-      request('/api/paused-jobs'),
-      request('/api/status'),
-      request('/api/found'),
-      request('/api/subtitle-translations'),
-    ]);
-    if (jobOffset >= jobs.total && jobOffset > 0) jobOffset = Math.max(0, jobOffset - jobPageSize);
-    renderJobs(jobs.jobs);
-    $('jobPageStatus').textContent = jobs.total
-      ? `${jobOffset + 1}–${Math.min(jobOffset + jobPageSize, jobs.total)} of ${jobs.total} jobs`
-      : 'No jobs yet';
-    $<HTMLButtonElement>('newerJobsBtn').disabled = jobOffset === 0;
-    $<HTMLButtonElement>('olderJobsBtn').disabled = jobOffset + jobPageSize >= jobs.total;
+    const view =
+      document.querySelector<HTMLElement>('[data-view].active')?.dataset.view || 'studio';
+    if (view === 'studio') {
+      const [jobs, paused, status, found] = await Promise.all([
+        request(`/api/jobs?view=summary&limit=${jobPageSize}&offset=${jobOffset}`),
+        occasional('/api/paused-jobs'),
+        request('/api/status'),
+        occasional('/api/found'),
+      ]);
+      if (jobOffset >= jobs.total && jobOffset > 0)
+        jobOffset = Math.max(0, jobOffset - jobPageSize);
+      renderJobs(jobs.jobs);
+      $('jobPageStatus').textContent = jobs.total
+        ? `${jobOffset + 1}–${Math.min(jobOffset + jobPageSize, jobs.total)} of ${jobs.total} jobs`
+        : 'No jobs yet';
+      $<HTMLButtonElement>('newerJobsBtn').disabled = jobOffset === 0;
+      $<HTMLButtonElement>('olderJobsBtn').disabled = jobOffset + jobPageSize >= jobs.total;
+      renderPaused(paused.jobs);
+      renderStatus(status, found);
+    } else if (view === 'library') {
+      const [status, found, paused] = await Promise.all([
+        request('/api/status'),
+        occasional('/api/found'),
+        request('/api/paused-jobs'),
+      ]);
+      renderStatus(status, found);
+      renderPaused(paused.jobs);
+    } else if (view === 'translations') {
+      const [translations, folders, subtitles] = await Promise.all([
+        request(
+          `/api/jobs?view=summary&type=translation&limit=${jobPageSize}&offset=${translationOffset}`,
+        ),
+        occasional('/api/translations'),
+        occasional('/api/subtitle-translations'),
+      ]);
+      if (translationOffset >= translations.total && translationOffset > 0)
+        translationOffset = Math.max(0, translationOffset - jobPageSize);
+      renderJobs(translations.jobs, 'translationJobs');
+      $('translationPageStatus').textContent =
+        `${Math.min(translationOffset + 1, translations.total)}–${Math.min(translationOffset + jobPageSize, translations.total)} of ${translations.total}`;
+      $<HTMLButtonElement>('newerTranslationsBtn').disabled = translationOffset === 0;
+      $<HTMLButtonElement>('olderTranslationsBtn').disabled =
+        translationOffset + jobPageSize >= translations.total;
+      renderSubtitleFiles(subtitles.files);
+      renderTranslations(folders);
+    }
     if (selectedJobId && $<HTMLDialogElement>('jobModal').open) {
       const selectedId = selectedJobId;
       const selected = await request(`/api/jobs/${encodeURIComponent(selectedId)}`);
       if (selectedJobId === selectedId) updateJobLive(selected);
     }
-    renderJobs(
-      jobs.jobs.filter((job: JobView) => job.type === 'translation'),
-      'translationJobs',
-    );
-    renderSubtitleFiles(subtitles.files);
-    renderTranslations(folders);
-    renderPaused(paused.jobs);
-    renderStatus(status, found);
     $('connectionStatus').textContent = '';
   } catch (error) {
     $('connectionStatus').textContent = `Connection: ${error.message}`;
@@ -1133,6 +1281,24 @@ document.addEventListener('DOMContentLoaded', () => {
     $('dropZone').classList.remove('drag-over');
     if (event.dataTransfer?.files[0]) void upload(event.dataTransfer?.files[0]);
   });
+  $('newerTranslationsBtn').onclick = () => {
+    translationOffset = Math.max(0, translationOffset - jobPageSize);
+    void refresh();
+  };
+  $('olderTranslationsBtn').onclick = () => {
+    translationOffset += jobPageSize;
+    void refresh();
+  };
+  $('pruneHistoryBtn').onclick = () => {
+    if (
+      confirm(
+        'Archive finished history entries whose temporary media has been removed? Saved subtitles and corrections remain available on disk.',
+      )
+    )
+      void post('/api/jobs/archive')
+        .then(refresh)
+        .catch((error) => notice(error.message));
+  };
   initializeWorkspace();
   initializeCodexTranslations();
   void refresh();
@@ -1147,11 +1313,15 @@ function notice(message: string, success = false) {
     modal.querySelector('.modal-notice')?.remove();
     const text = element('p', message, 'modal-notice error-message');
     text.setAttribute('role', 'alert');
+    text.append(button('Dismiss', () => text.remove()));
     $('jobDetails').prepend(text);
     return;
   }
   const banner = $('notice');
-  banner.textContent = message;
+  banner.replaceChildren(
+    element('span', message),
+    button('Dismiss', () => banner.classList.add('hidden')),
+  );
   banner.classList.remove('hidden');
   banner.classList.toggle('success', success);
   banner.scrollIntoView({ block: 'nearest', behavior: 'instant' });
@@ -1282,6 +1452,7 @@ function initializeWorkspace() {
         notice(error.message);
       });
     }
+    void refresh();
   };
   document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((button) =>
     button.addEventListener('click', () => {
@@ -1372,6 +1543,12 @@ interface StatusView {
     currentTitle?: string;
     pendingTitles: string[];
   };
-  storage: { temporaryBytes: number; availableBytes: number; maxTemporaryBytes: number };
+  storage: {
+    screeningBytes?: number;
+    transcriptBytes?: number;
+    temporaryBytes: number;
+    availableBytes: number;
+    maxTemporaryBytes: number;
+  };
   skippedFiles: { filename: string; reason: string }[];
 }

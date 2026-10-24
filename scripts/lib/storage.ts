@@ -25,14 +25,32 @@ export async function directoryBytes(dir: string): Promise<number> {
   return bytes;
 }
 
-let snapshot: Promise<{ temporaryBytes: number; availableBytes: number }> | undefined;
+let snapshot:
+  | Promise<{
+      temporaryBytes: number;
+      availableBytes: number;
+      screeningBytes: number;
+      transcriptBytes: number;
+      correctionBytes: number;
+    }>
+  | undefined;
 let snapshotAt = 0;
 export function storageStatus() {
   if (!snapshot || Date.now() - snapshotAt > 10000) {
     snapshotAt = Date.now();
-    snapshot = Promise.all([directoryBytes(at('temp')), fs.statfs(at('temp'))]).then(
-      ([temporaryBytes, disk]) => ({ temporaryBytes, availableBytes: disk.bavail * disk.bsize }),
-    );
+    snapshot = Promise.all([
+      directoryBytes(at('temp')),
+      fs.statfs(at('temp')),
+      directoryBytes(at('review-sessions')),
+      directoryBytes(at('output', 'raw_transcriptions')),
+      directoryBytes(at('data', 'subtitle-reviews')),
+    ]).then(([temporaryBytes, disk, screeningBytes, transcriptBytes, correctionBytes]) => ({
+      temporaryBytes,
+      availableBytes: disk.bavail * disk.bsize,
+      screeningBytes,
+      transcriptBytes,
+      correctionBytes,
+    }));
     void snapshot.catch(() => {
       snapshot = undefined;
     });

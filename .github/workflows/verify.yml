@@ -1,0 +1,45 @@
+name: Verify private studio
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install fixture tools
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm run format:check
+      - run: npm run docs:providers -- --check
+      - run: npm test
+      - run: npm run build
+      - name: Build cloud image
+        run: docker build --tag yesilcam-ci .
+      - name: Smoke image without provider credentials
+        run: |
+          docker run -d --name studio-ci -p 127.0.0.1:3000:3000 -e APP_PASSWORD=ci-disposable-password -e PUBLIC_ORIGIN=http://127.0.0.1:3000 yesilcam-ci
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3000/health; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:3000/health
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/jobs)" = 401
+          docker exec studio-ci node node_modules/@openai/codex/bin/codex.js --version
+          docker exec studio-ci test ! -d /app/build/scripts/tests
+          docker stop --time 20 studio-ci
+      - name: Container logs
+        if: failure()
+        run: docker logs studio-ci || true

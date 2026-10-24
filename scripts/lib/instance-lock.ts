@@ -4,14 +4,16 @@ import { childEnvironment } from './process.js';
 
 // Kernel advisory locks work across containers sharing the same local volume.
 // PID files do not: a replacement container can reuse the previous PID.
-export async function acquireInstanceLock(): Promise<() => Promise<void>> {
+export async function acquireInstanceLock(
+  file = at('data', 'server.lock'),
+): Promise<() => Promise<void>> {
   const child = spawn(
     'flock',
     [
       '--nonblock',
       '--conflict-exit-code',
       '73',
-      at('data', 'server.lock'),
+      file,
       process.execPath,
       '-e',
       "process.stdout.write('locked\\n');process.stdin.resume();process.stdin.on('end',()=>process.exit(0));",

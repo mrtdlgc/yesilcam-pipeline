@@ -3,7 +3,7 @@
  * Processes a segment of audio samples in parallel
  */
 
-import { parentPort as suppliedPort, workerData } from 'worker_threads';
+import { parentPort as suppliedPort, workerData } from 'node:worker_threads';
 
 if (!suppliedPort) throw new Error('This script must run in a worker thread');
 const parentPort = suppliedPort;
@@ -56,27 +56,12 @@ try {
   /**
    * Cooley-Tukey FFT (radix-2, in-place) - O(n log n)
    */
-  let fftDebugOnce = true;
   function fft(real: Float32Array, imag: Float32Array) {
     const n = real.length;
 
-    if (fftDebugOnce) {
-      parentPort.postMessage({
-        type: 'debug',
-        workerId,
-        msg: `FFT: n=${n}, real.len=${real.length}, imag.len=${imag.length}`,
-      });
-    }
-
     // Bit-reversal permutation
-    if (fftDebugOnce) {
-      parentPort.postMessage({ type: 'debug', workerId, msg: `FFT: starting bit-reversal loop` });
-    }
 
     for (let i = 0, j = 0; i < n; i++) {
-      if (fftDebugOnce && i === 0) {
-        parentPort.postMessage({ type: 'debug', workerId, msg: `FFT: first iteration i=0` });
-      }
       if (i < j) {
         [real[i], real[j]] = [real[j], real[i]];
         [imag[i], imag[j]] = [imag[j], imag[i]];
@@ -88,17 +73,6 @@ try {
         k >>= 1;
       }
       j += k;
-      if (fftDebugOnce && i === 0) {
-        parentPort.postMessage({
-          type: 'debug',
-          workerId,
-          msg: `FFT: first iteration done, j=${j}`,
-        });
-      }
-    }
-
-    if (fftDebugOnce) {
-      parentPort.postMessage({ type: 'debug', workerId, msg: `FFT: bit-reversal done` });
     }
 
     // Cooley-Tukey FFT
@@ -122,11 +96,6 @@ try {
           imag[idx1] += tImag;
         }
       }
-    }
-
-    if (fftDebugOnce) {
-      parentPort.postMessage({ type: 'debug', workerId, msg: `FFT: butterfly done` });
-      fftDebugOnce = false;
     }
   }
 
@@ -284,7 +253,6 @@ try {
    * Classify a single window using spectral features
    */
   // Debug flag - only log for first window
-  let debugFirstWindow = true;
 
   function classifyWindow(windowStartIdx: any) {
     const windowEndIdx = windowStartIdx + analysisWindowSamples;
@@ -292,26 +260,11 @@ try {
     const startTime = (windowStartIdx + globalOffset) / config.SAMPLE_RATE;
     const endTime = (windowEndIdx + globalOffset) / config.SAMPLE_RATE;
 
-    if (debugFirstWindow)
-      parentPort.postMessage({
-        type: 'debug',
-        workerId,
-        msg: `step1: computing energy ${windowStartIdx}-${windowEndIdx}`,
-      });
-
     // Compute energy directly from samples
     const avgEnergy = computeWindowEnergy(windowStartIdx, windowEndIdx);
 
-    if (debugFirstWindow)
-      parentPort.postMessage({
-        type: 'debug',
-        workerId,
-        msg: `step2: energy=${avgEnergy.toFixed(6)}, threshold=${silenceThreshold.toFixed(6)}`,
-      });
-
     // Check for silence first
     if (avgEnergy < silenceThreshold) {
-      debugFirstWindow = false;
       return {
         start: startTime,
         end: endTime,
@@ -320,13 +273,6 @@ try {
         features: { avgEnergy, reason: 'low_energy' },
       };
     }
-
-    if (debugFirstWindow)
-      parentPort.postMessage({
-        type: 'debug',
-        workerId,
-        msg: `step3: computing FFT, fftSize=${fftSize}, samplesLen=${samplesArray.length}`,
-      });
 
     // Compute spectral features using 3 FFT samples (start, middle, end)
     let avgSpectralFlatness = 0;
@@ -342,36 +288,12 @@ try {
       windowStartIdx + analysisWindowSamples - fftSize,
     ];
 
-    if (debugFirstWindow)
-      parentPort.postMessage({
-        type: 'debug',
-        workerId,
-        msg: `step3a: samplePoints=${JSON.stringify(samplePoints)}`,
-      });
-
     for (let pi = 0; pi < samplePoints.length; pi++) {
       const j = samplePoints[pi];
-      if (debugFirstWindow)
-        parentPort.postMessage({
-          type: 'debug',
-          workerId,
-          msg: `step3b: point ${pi}, j=${j}, check=${j >= 0 && j + fftSize <= samplesArray.length}`,
-        });
 
       if (j >= 0 && j + fftSize <= samplesArray.length) {
-        if (debugFirstWindow)
-          parentPort.postMessage({
-            type: 'debug',
-            workerId,
-            msg: `step3c: calling computeSpectrum(${j})`,
-          });
         const spectrum = computeSpectrum(j);
-        if (debugFirstWindow)
-          parentPort.postMessage({
-            type: 'debug',
-            workerId,
-            msg: `step3d: spectrum done, len=${spectrum.length}`,
-          });
+
         avgSpectralFlatness += calculateSpectralFlatness(spectrum);
         avgSpeechBandRatio += calculateSpeechBandRatio(spectrum);
         const centroid = calculateSpectralCentroid(spectrum);
@@ -411,23 +333,10 @@ try {
         centroidValues.length;
     }
 
-    if (debugFirstWindow)
-      parentPort.postMessage({
-        type: 'debug',
-        workerId,
-        msg: `step4: FFT done, computing modulation`,
-      });
-
     // Calculate other features
     const energyModulation = calculateEnergyModulation(windowStartIdx, windowEndIdx);
 
-    if (debugFirstWindow)
-      parentPort.postMessage({ type: 'debug', workerId, msg: `step5: computing ZCR` });
-
     const zcr = calculateZCR(windowStartIdx, windowEndIdx);
-
-    if (debugFirstWindow)
-      parentPort.postMessage({ type: 'debug', workerId, msg: `step6: scoring` });
 
     // Speech scoring based on multiple features
     let speechScore = 0;
@@ -524,11 +433,6 @@ try {
       type = 'ambiguous';
     }
 
-    if (debugFirstWindow) {
-      parentPort.postMessage({ type: 'debug', workerId, msg: `step7: done, type=${type}` });
-      debugFirstWindow = false;
-    }
-
     return {
       start: startTime,
       end: endTime,
@@ -556,26 +460,8 @@ try {
   // Report progress every 5%
   const progressInterval = Math.max(1, Math.floor(totalWindows / 20));
 
-  parentPort.postMessage({
-    type: 'debug',
-    workerId,
-    msg: `Starting loop: ${totalWindows} windows, interval=${progressInterval}`,
-  });
-
   for (let i = startIdx; i + analysisWindowSamples <= endIdx; i += hopSamples) {
-    if (processed === 0) {
-      parentPort.postMessage({ type: 'debug', workerId, msg: `First window at i=${i}` });
-    }
-
     const result = classifyWindow(i);
-
-    if (processed === 0) {
-      parentPort.postMessage({
-        type: 'debug',
-        workerId,
-        msg: `First window done, type=${result?.type}`,
-      });
-    }
 
     if (result) {
       results.push(result);

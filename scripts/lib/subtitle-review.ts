@@ -48,6 +48,12 @@ async function filename(id: string) {
 export async function readSubtitleReview(id: string): Promise<SubtitleReview> {
   const document = await readJson<SubtitleReview>(await filename(id));
   if (document.version !== 2 || document.id !== id) fail(409, 'Unsupported subtitle review');
+  const saved = await readJson<{ position: number } | null>(
+    at('data', 'subtitle-review-positions', `${jobId(id)}.json`),
+    null,
+  );
+  if (saved && Number.isFinite(saved.position))
+    document.position = Math.max(0, Math.min(document.duration, saved.position));
   return document;
 }
 export async function createSubtitleReview(input: {
@@ -74,6 +80,12 @@ export async function createSubtitleReview(input: {
           409,
           'This screening already has a different source. Preserve its edits and use a new job.',
         );
+      if (!existing.media && input.media) {
+        existing.media = input.media;
+        existing.mediaMessage = '';
+        existing.revision++;
+        await writeJson(file, existing);
+      }
       return existing; // A retry must never replace human corrections.
     }
     const source = subtitleDocument(input.source).cues;
@@ -94,7 +106,11 @@ export async function createSubtitleReview(input: {
     )
       fail(409, 'Source and translation must have matching cue IDs and timings for paired review');
     const cues = source.map((cue, index): ReviewCue => ({
-      ...cue,
+      id: cue.id,
+      start: cue.start,
+      end: cue.end,
+      startTime: cue.startTime,
+      endTime: cue.endTime,
       texts: {
         [input.sourceLanguage]: cue.text,
         ...(target ? { [input.targetLanguage]: target[index].text } : {}),
@@ -142,15 +158,16 @@ export function reviewExport(
   original = false,
 ) {
   const cues = segments(document, language, original);
-  if (format === 'srt') return segmentsToSrt(cues, { preserveIds: true, preserveTimestamps: true });
+  if (format === 'srt')
+    return segmentsToSrt(cues, { preserveIds: original, preserveTimestamps: true });
   if (format === 'ass') return subtitlesToAss(cues);
   if (format === 'vtt')
     return (
       'WEBVTT\n\n' +
       cues
         .map(
-          (cue) =>
-            `${cue.id}\n${formatTimestamp(cue.start).replace(',', '.')} --> ${formatTimestamp(cue.end).replace(',', '.')}\n${cue.text}`,
+          (cue, index) =>
+            `${original ? cue.id : index + 1}\n${formatTimestamp(cue.start).replace(',', '.')} --> ${formatTimestamp(cue.end).replace(',', '.')}\n${cue.text}`,
         )
         .join('\n\n') +
       '\n'
@@ -325,7 +342,24 @@ export async function editSubtitleReview(id: string, input: any) {
 export async function saveReviewPosition(id: string, position: unknown) {
   return serialized(key(id), async () => {
     const document = await readSubtitleReview(id);
-    document.position = time(position, document.duration);
+    await writeJson(at('data', 'subtitle-review-positions', `${jobId(id)}.json`), {
+      position: time(position, document.duration),
+    });
+  });
+}
+
+export async function removeScreeningCopy(id: string) {
+  return serialized(key(id), async () => {
+    const document = await readSubtitleReview(id);
+    if (document.media)
+      await fs.rm(await contained(at('review-sessions'), jobId(id), document.media), {
+        force: true,
+      });
+    document.media = null;
+    document.mediaMessage =
+      'Screening copy removed to free space. Select a local film or prepare the screening again.';
+    document.revision++;
     await writeJson(await filename(id), document);
+    await fs.rm(at('data', 'subtitle-review-media', `${jobId(id)}.json`), { force: true });
   });
 }

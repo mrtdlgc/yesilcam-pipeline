@@ -17,7 +17,7 @@ import { checkAbort, probe, run } from './lib/process.js';
 import { withTempBudget } from './lib/storage.js';
 import { checkExistingSubtitles } from './0_check_subs.js';
 import { downloadVideo } from './1_download_video.js';
-import { extractAndOptimizeAudio } from './2_extract_audio.js';
+import { validateSourceMedia } from './2_extract_audio.js';
 import { chunkAudio } from './2.5_chunk_audio.js';
 import { filterWithSileroVAD } from './2.6_vad_filter.js';
 import {
@@ -42,7 +42,7 @@ import { writeSubtitleArtifacts } from './lib/subtitle-export.js';
 
 export function validateSettings(settings: Settings) {
   validateProviderSettings({ ...config, ...settings });
-  if (!['codex-local', 'ollama'].includes(settings.TRANSLATION_PROVIDER))
+  if (!['codex-local'].includes(settings.TRANSLATION_PROVIDER))
     throw new Error('Unknown translation provider');
   if (
     typeof settings.CODEX_MODEL !== 'string' ||
@@ -207,6 +207,35 @@ async function embeddedTarget(input: any, targetLanguage: string, options: any) 
     tr: ['tr', 'tur'],
     uk: ['uk', 'ukr'],
     ru: ['ru', 'rus'],
+    de: ['de', 'deu', 'ger'],
+    fr: ['fr', 'fra', 'fre'],
+    es: ['es', 'spa'],
+    it: ['it', 'ita'],
+    ar: ['ar', 'ara'],
+    fa: ['fa', 'fas', 'per'],
+    el: ['el', 'ell', 'gre'],
+    nl: ['nl', 'nld', 'dut'],
+    pt: ['pt', 'por'],
+    pl: ['pl', 'pol'],
+    ro: ['ro', 'ron', 'rum'],
+    zh: ['zh', 'zho', 'chi'],
+    ja: ['ja', 'jpn'],
+    ko: ['ko', 'kor'],
+    hi: ['hi', 'hin'],
+    he: ['he', 'heb'],
+    cs: ['cs', 'ces', 'cze'],
+    sv: ['sv', 'swe'],
+    da: ['da', 'dan'],
+    no: ['no', 'nor'],
+    fi: ['fi', 'fin'],
+    hu: ['hu', 'hun'],
+    bg: ['bg', 'bul'],
+    sr: ['sr', 'srp'],
+    hr: ['hr', 'hrv'],
+    sk: ['sk', 'slk', 'slo'],
+    th: ['th', 'tha'],
+    vi: ['vi', 'vie'],
+    id: ['id', 'ind'],
   };
   const stream = info.streams.find(
     (s: any) =>
@@ -314,6 +343,7 @@ async function finalize(manifest: any, srt: string, sourceLanguage: string, opti
         {
           settings,
           signal: options.signal,
+          onStage: options.onStage,
           checkpoint: at('temp', id, 'translation-checkpoint.json'),
           workDir: at('temp', id, 'codex'),
           receiptDir: at('data', 'translation-receipts', id),
@@ -436,6 +466,7 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
     validateSettings(settings);
     manifest = {
       version: 1,
+      pathSchema: 1,
       id,
       title: job.title || 'Movie',
       type: job.type,
@@ -454,6 +485,7 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
   manifest.settings = movieSettings({
     ...config,
     ...manifest.settings,
+    PORTABLE_PATHS: manifest.pathSchema === 1,
     TRANSCRIPTION_MODE: manifest.settings.TRANSCRIPTION_MODE ?? 'chunks',
     TRANSCRIPTION_DIARIZATION: manifest.settings.TRANSCRIPTION_DIARIZATION ?? false,
   });
@@ -514,6 +546,14 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
           targetLanguage: settings.TARGET_LANGUAGE,
           input: manifest.type === 'video' ? manifest.input : null,
         });
+      if (existing && 'referenceOnly' in existing && existing.referenceOnly) {
+        const reference = at('found', `${titleSlug(manifest.title)}_${id}_reference.srt`);
+        await atomicWrite(reference, existing.content);
+        await warning(
+          'An IMDb-only subtitle match was saved as a reference. Transcribing this film to preserve its timing.',
+        );
+        existing = null;
+      }
       if (existing) {
         manifest.existingSource = existing.source;
         await options.onStage?.({
@@ -576,7 +616,7 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
         ? 'Preparing continuous movie audio'
         : 'Inspecting audio and finding cut points',
     });
-    const input = await extractAndOptimizeAudio(manifest.input, id, common);
+    const input = await validateSourceMedia(manifest.input, id, common);
     const stat = await fs.stat(input);
     if (
       manifest.sourceStat &&
@@ -870,79 +910,4 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
     ...common,
     speakers: speakerContext(segments),
   });
-}
-
-export const processMovie = (
-  youtubeUrl: any,
-  imdbId: any,
-  progress: any,
-  context: Record<string, any> = {},
-  options: PipelineOptions = {},
-) =>
-  runPipeline(
-    {
-      ...context,
-      id: context.id ?? context.jobId ?? validateId(),
-      type: 'youtube',
-      youtubeUrl,
-      imdbId,
-    },
-    { ...options, progress },
-  );
-export const processAudioFile = (
-  input: any,
-  title: string,
-  progress: any,
-  options: PipelineOptions = {},
-) =>
-  runPipeline(
-    {
-      ...options.job,
-      id: options.job?.id ?? validateId(),
-      type: 'audio',
-      input,
-      title,
-    },
-    { ...options, progress },
-  );
-export const processVideoFile = (
-  input: any,
-  progress: any,
-  context: Record<string, any> = {},
-  options: PipelineOptions = {},
-) =>
-  runPipeline(
-    {
-      ...context,
-      id: context.id ?? context.jobId ?? validateId(),
-      type: 'video',
-      input,
-      title: context.title ?? path.parse(input).name,
-    },
-    { ...options, progress },
-  );
-export async function resumePausedJob(id: any, progress: any, options: PipelineOptions = {}) {
-  validateId(id);
-  if (!(await readJson(at('temp', id, 'manifest.json'), null)))
-    throw new Error('Recovery manifest is missing; offsets cannot be reconstructed safely');
-  return runPipeline({ id }, { ...options, progress, resume: true });
-}
-export async function listPausedJobs() {
-  const entries = await fs.readdir(at('temp'), { withFileTypes: true }).catch((error) => {
-    if (error.code === 'ENOENT') return [];
-    throw error;
-  });
-  const jobs = [];
-  for (const entry of entries)
-    if (entry.isDirectory() && /^[a-zA-Z0-9_-]{1,100}$/.test(entry.name)) {
-      const data = await readJson(at('temp', entry.name, 'manifest.json'), null);
-      if (data?.stage === 'paused')
-        jobs.push({
-          jobId: data.id,
-          title: data.title,
-          pausedAt: data.pausedAt,
-          chunkCount: data.chunks.length,
-        });
-    }
-  return jobs;
 }

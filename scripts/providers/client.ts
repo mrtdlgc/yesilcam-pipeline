@@ -1,4 +1,6 @@
-import { processLockContents } from '../lib/process-identity.js';
+import type { RequestState } from '../../types/checkpoints.js';
+import { acquireProcessLock } from '../lib/process-identity.js';
+import { assertPaidSubmissionAllowed, trackPaidWork } from '../lib/paid-work.js';
 import type { Settings } from '../../types/pipeline.js';
 import { credential } from '../lib/credentials.js';
 import fs from 'node:fs/promises';
@@ -37,7 +39,10 @@ export function checkCloudPlan(plan: any, settings: Settings) {
     );
 }
 
-export function reservedAmount(request: any, currency: any) {
+export function reservedAmount(
+  request: Pick<RequestState, 'estimate' | 'reportedCost' | 'usageCostEstimate'>,
+  currency: string,
+) {
   return Math.max(
     request.estimate.amount ?? 0,
     request.reportedCost?.currency === currency ? request.reportedCost.amount : 0,
@@ -54,7 +59,7 @@ export async function usageReport(rawDir: string, plan: any) {
   for (const file of files.filter((f) =>
     /^chunk_[a-zA-Z0-9_-]+(?:\.attempt-\d+)?\.request\.json$/.test(f),
   )) {
-    const r = await readJson(path.join(rawDir, file));
+    const r = await readJson<RequestState>(path.join(rawDir, file));
     requests.push({
       chunkId: r.chunkId,
       provider: r.provider,
@@ -117,20 +122,11 @@ export async function transcribeCloud(
 ) {
   await fs.mkdir(options.rawDir, { recursive: true });
   const lockFile = path.join(options.rawDir, `chunk_${chunk.id}.request.lock`);
-  let lock;
+  const release = await acquireProcessLock(lockFile);
   try {
-    lock = await fs.open(lockFile, 'wx', 0o600);
-    await lock.writeFile(await processLockContents());
-  } catch (error) {
-    if (error.code === 'EEXIST')
-      throw new Error(`Cloud request is locked: ${lockFile}. Check its PID before reconciling.`);
-    throw error;
-  }
-  try {
-    return await transcribeLocked(chunk, language, prompt, settings, options);
+    return await trackPaidWork(() => transcribeLocked(chunk, language, prompt, settings, options));
   } finally {
-    await lock.close();
-    await fs.rm(lockFile, { force: true });
+    await release();
   }
 }
 
@@ -216,7 +212,7 @@ async function transcribeLocked(
     )
     .digest('hex');
   const stateFile = path.join(options.rawDir, `chunk_${chunk.id}.request.json`);
-  let state = await readJson(stateFile, null);
+  let state = await readJson<RequestState | null>(stateFile, null);
   if (state && state.identity !== identity)
     throw new Error('Cloud request checkpoint does not match the audio/configuration');
   if (state && ['submitting', 'uncertain'].includes(state.status)) {
@@ -236,7 +232,7 @@ async function transcribeLocked(
     attempts: 0,
     createdAt: new Date().toISOString(),
   };
-  const save = async (patch: any) => {
+  const save = async (patch: Partial<RequestState>) => {
     Object.assign(state, patch);
     await writeJson(stateFile, state);
   };
@@ -270,6 +266,7 @@ async function transcribeLocked(
   };
   const submit = async (url: string, init: any) => {
     if (state.submissionResponse) return state.submissionResponse;
+    assertPaidSubmissionAllowed();
     const usage = await usageReport(options.rawDir, options.plan);
     const reserved = usage.requests
       .filter((r) => !['prepared', 'rejected'].includes(r.status))
@@ -277,6 +274,7 @@ async function transcribeLocked(
     if (quote.amount === null || reserved + quote.amount > settings.CLOUD_MAX_ESTIMATED_COST)
       throw new Error('Next request exceeds the estimated job allowance');
     signal.throwIfAborted();
+    assertPaidSubmissionAllowed();
     await save({
       status: 'submitting',
       submittedAt: new Date().toISOString(),

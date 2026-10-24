@@ -42,7 +42,9 @@ export interface Word {
   word: string;
   probability?: number;
   speaker?: string;
-  [metadata: string]: any;
+  speakerScope?: string;
+  review?: string[];
+  _timing?: string;
 }
 export interface Segment {
   start: number;
@@ -62,15 +64,26 @@ export interface Segment {
   no_speech_prob?: number;
   compression_ratio?: number;
   seek?: number;
-  [metadata: string]: any;
+  id?: string | number;
+  startTime?: string;
+  endTime?: string;
+  _chunkId?: string | number;
+  _filmOffset?: number;
+  _sourceSpan?: { start: number; end: number };
+  _alignment?: Record<string, unknown>;
 }
 export interface Chunk {
   id: number | string;
   file: string;
   startTime: number;
   endTime: number;
-  speechProfile?: any;
-  [metadata: string]: any;
+  speechProfile?: { time: number; prob: number }[];
+  profileFile?: string;
+  audioStat?: { size: number; mtimeMs: number };
+  _review?: string[];
+  _original_file?: string;
+  hasSpeech?: boolean | null;
+  audioFormat?: string;
 }
 export interface PipelineOptions {
   settings?: Partial<Settings>;
@@ -83,9 +96,30 @@ export interface PipelineOptions {
   onStage?: (update: StageUpdate) => void | Promise<void>;
   worker?: WhisperWorker;
   resume?: boolean;
-  [option: string]: any;
+  checkpoint?: string;
+  receiptDir?: string;
+  retryCodex?: boolean;
+  sourceLanguage?: string;
+  targetLanguage?: string;
+  input?: string;
+  includeVideo?: boolean;
+  returnChunks?: boolean;
+  profileFile?: string;
+  dropThreshold?: number;
+  markThreshold?: number;
+  fftReportPath?: string | null;
+  speakers?: ReturnType<typeof import('../scripts/lib/speakers.js').speakerContext>;
+  duration?: number;
+  maxShift?: number;
+  padding?: number;
+  profile?: ({ time: number } & Record<string, number>)[];
+  noiseThreshold?: number;
+  minSilenceDuration?: number;
+  minSilence?: number;
+  threshold?: number;
 }
 export interface Job {
+  pathSchema?: 1;
   id: string;
   title: string;
   type: 'audio' | 'video' | 'youtube' | 'translation';

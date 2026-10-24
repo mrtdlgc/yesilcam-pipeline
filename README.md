@@ -5,9 +5,10 @@ Scribe v2**, through OpenRouter for short requests or directly through ElevenLab
 movie. Preserve word timings and speaker turns for contextual translation. Other providers remain
 selectable.
 
-This checkout was recovered from the original Windows Downloads copy. That copy and its existing
-outputs were preserved. The local Git baseline records the imported source; the remediation is
-available as a working-tree diff. No GitHub remote is configured.
+Source is versioned in the private
+[GitHub repository](https://github.com/mrtdlgc/yesilcam-pipeline). Runtime media, credentials and
+account state are excluded. Historical implementation notes are in [docs/history](docs/history/).
+See [the Opus audit remediation record](AUDIT_FIXES.md).
 
 ## Deploy on Coolify
 
@@ -29,27 +30,31 @@ covers deployment, batch controls, transcription/translation recovery, and revie
 at `~/.hermes/skills/yesilcam-operator/SKILL.md` and invoke `/yesilcam-operator` in a new session.
 
 Read [deployment, storage, password recovery, and the acceptance checklist](DEPLOYMENT.md) before
-your first deployment. Strict TypeScript migration details are in [MIGRATION.md](MIGRATION.md). The
-Scribe default follows a small Ah Nerede comparison of original/vocal audio using GPT Transcribe,
-Scribe v2, and Qwen3-ASR. It is a workflow choice, not proof of accuracy on every film.
+your first deployment. Strict TypeScript migration details are in
+[the migration history](docs/history/MIGRATION.md). The Scribe default follows a small Ah Nerede
+comparison of original/vocal audio using GPT Transcribe, Scribe v2, and Qwen3-ASR. It is a workflow
+choice, not proof of accuracy on every film.
 
 ## Current pipeline
 
 All inputs—audio uploads, YouTube videos, watched films, and resumed jobs—use `scripts/pipeline.ts`:
 
 1. Check for usable target-language subtitles. Local films can reuse embedded text subtitles or an
-   exact OpenSubtitles movie-hash match. IMDb lookup is supported for submitted videos. Provider
-   failures are logged and generation continues.
+   exact OpenSubtitles movie-hash match. IMDb-only matches are saved as references and never skip
+   transcription. Machine-translated matches are excluded; exact movie-hash matches are preferred
+   and ranked by downloads. Provider failures are logged and generation continues.
 2. Choose request granularity. **Direct ElevenLabs + Automatic/Full movie** prepares one continuous
    16 kHz mono FLAC, including all music and silence. Other providers and explicit **Short chunks**
-   keep the original energy-selected PCM chunking and film offsets.
+   keep energy-selected chunks and film offsets. New cloud chunks use 16 kHz mono signed-16 FLAC;
+   existing checkpoints retain their original audio and identities.
 3. Optionally pause to review prepared audio before paid transcription.
 4. Full-movie Scribe streams one multipart upload and uses native word timing; no local VAD,
    hallucination filter, or alignment model runs. Chunked mode retains optional local speech checks.
 5. Save raw responses, request identity and usage before normalization. Completed responses are
    reused; an uncertain paid submission requires reconciliation rather than an automatic repeat.
 6. Build Scribe cues from actual words, split at speaker changes, and keep request-scoped labels.
-   Zero-duration or unusually long words are retained with review flags. Native long cues are
+   Isolated timestamp anomalies are repaired, sorted or clamped and marked `timestamp_repaired`;
+   zero-duration and unusually long words are retained with review flags. Native long cues are
    flagged rather than silently truncated. Chunked jobs can also use local filtering and alignment.
 7. Export SRT, styled ASS, layout/readability reports, and speaker annotations. The default
    Netflix-inspired layout targets two lines of 42 characters; anonymous voice groups are not names.
@@ -57,9 +62,9 @@ All inputs—audio uploads, YouTube videos, watched films, and resumed jobs—us
    every cue ID and timestamp. Translating an unchanged saved source later also reuses its matching
    speaker sidecar. Uploaded or modified subtitles do not inherit unverified annotations.
 
-Your spectral classifier remains in `scripts/workers/audio_analysis_worker.ts`, with the original
-backup alongside it. `scripts/test_speech_detection.ts` is a separate diagnostic; the live chunker
-does not claim to run that classifier.
+Your spectral classifier remains in `scripts/workers/audio_analysis_worker.ts`, as a standalone
+diagnostic. `scripts/test_speech_detection.ts` is a separate diagnostic; the live chunker does not
+claim to run that classifier.
 
 The default is **direct `elevenlabs` / `scribe_v2`, one continuous movie**. OpenRouter and other
 adapters remain available. Optional local ASR still uses **large-v3**. Local `WORD_TIMESTAMPS` stays
@@ -105,8 +110,8 @@ The web application and tooling use strict TypeScript, ESM, Express, and a small
 audio/ML stages remain Python. Use Linux (or the Docker image), Node 22.12+ (Node 24 in the image),
 Python 3.12, FFmpeg/ffprobe, and `flock` from util-linux.
 
-The following are setup/build commands. The native local deployment was rebuilt on 2026-10-24;
-Docker and ARM image builds still require deployment checks:
+The following are setup/build commands. CI checks the production image on native x64 and ARM64
+runners; deployment-specific provider login and playback still need acceptance checks:
 
 ```bash
 npm ci --ignore-scripts
@@ -125,8 +130,8 @@ npm run build     # compile TypeScript and copy browser/Python resources
 npm start
 ```
 
-Open `http://127.0.0.1:3000/`. `npm run dev` performs a build, then watches the compiled server for
-restarts; rerun the build after source edits. Source CLI tools also have
+Open `http://127.0.0.1:3000/`. `npm run dev` watches TypeScript, browser assets and configuration,
+rebuilding before restarting the compiled server. Source CLI tools also have
 `npm run compare:transcription -- ...` and `npm run recover:transcription -- ...` commands using
 tsx. The production image uses the compiled `node build/scripts/...js` commands and excludes
 development dependencies.
@@ -142,9 +147,8 @@ image, with separate PyTorch and CTranslate2 environments/library paths; follow 
 
 The requirements pin direct Python dependencies, not the complete transitive environment. The
 Dockerfile installs CPU wheels only when local audio/ASR build options are enabled and fails if no
-compatible binary wheel exists. Demucs and its model downloads are excluded. Its legacy worker
-source is retained for historical experiments, but is not called by the application and its
-dependency is not in the image.
+compatible binary wheel exists. Demucs and its model downloads are excluded. Obsolete workers and
+wrappers are retained in Git history, not shipped in the image.
 
 ## Processing and review
 
@@ -159,8 +163,9 @@ jobs. A scanner reset allows a finished film to be submitted again.
 Docker removes temporary media only after successful completion by default. Turn on **Keep temporary
 audio after success** for comparison work. Subtitles, raw ASR checkpoints, translation receipts and
 automatic review sessions and saved corrections remain on the volume. Failed and paused jobs keep
-their recovery files. A screening-preparation failure retains the source and pauses the batch by
-default; its separate retry never resubmits transcription.
+their recovery files. Exported jobs complete immediately. Screening preparation runs as a separate
+low-priority worker with a duration-scaled timeout; failure retains the source and does not pause
+transcription. Its separate retry never resubmits transcription.
 
 Completed jobs open through **Watch & correct**. Fix only problematic text or timing: edits save to
 the server, timing changes apply to both languages, and SRT/ASS downloads immediately reflect saved
@@ -219,9 +224,9 @@ the Details progress refreshes without closing the dialog.
 
 Select **Pause before transcription** in Studio to stop before speech detection and ASR. A retry or
 server restart does not bypass that stop. **Continue to ASR** explicitly resumes the review pause.
-**Review audio chunks** opens source audio with film offsets, individual WAV downloads and paginated
-players. Historical jobs also expose their saved vocal comparisons. Only committed archived vocal
-files are offered, and audio requests require the workspace login.
+**Review audio chunks** opens source audio with film offsets, individual audio downloads and
+paginated players. Historical jobs also expose their saved vocal comparisons. Only committed
+archived vocal files are offered, and audio requests require the workspace login.
 
 Keep the same original/vocal pairs when refining difficult material such as _Ah Nerede_. The
 existing comparison tool can reuse selected prepared chunks across ASR models without rerunning
@@ -232,9 +237,10 @@ quality.
 ## Translation
 
 Open **Translations**, choose a complete SRT from the library or upload an SRT/SRT-formatted TXT,
-set the film title and languages, then click **Translate with local Codex**. UTF-8 and Turkish
-Windows-1254 uploads are supported (1 MB maximum). The existing transcription/audio stages are not
-rerun. **Studio** also has an option to translate automatically after transcription.
+set the film title and languages, then click **Translate with local Codex**. Choose the uploaded
+file’s encoding explicitly: UTF-8, Windows-1254/1251/1256/1252, or UTF-16 (1 MB maximum). The
+existing transcription/audio stages are not rerun. **Studio** also has an option to translate
+automatically after transcription.
 
 This invokes the installed `codex exec` using the server user's existing **ChatGPT login**. The CLI
 runs locally; the model runs in the cloud and uses your Codex subscription allowance. The app does
@@ -258,8 +264,8 @@ Native installs: run `codex login` as the same OS user running the app. Docker i
 it is outside the service's PATH. `CODEX_TRANSLATION_TIMEOUT_MS` defaults to 30 minutes per film.
 [Official Codex non-interactive documentation](https://learn.chatgpt.com/docs/non-interactive-mode)
 describes the supported CLI interface; [authentication](https://learn.chatgpt.com/docs/auth)
-explains ChatGPT subscription login. The standard CPU Docker image does not include Codex or your
-host login; this integration is intended for the native local deployment.
+explains ChatGPT subscription login. The standard CPU Docker image includes Codex. It needs its own
+login; no host account state is copied.
 
 For older workflows, set `EXPORT_TRANSLATION_CHUNKS: true`. Each job then has a unique
 `output/translation_chunks/<title>_<job-id>/` folder. Its manifest holds immutable source cues and
@@ -273,11 +279,7 @@ placeholders are rejected. A merge requires every cue to have a valid translatio
 source cue IDs and timestamp strings, including CRLF/BOM input parsing. Structural validation cannot
 establish translation quality; review the result.
 
-For local Ollama translation, set `TRANSLATION_PROVIDER: 'ollama'`, enable `TRANSLATION_ENABLED` and
-configure an installed Ollama model. Model matching is exact. Prompts use the job's source and
-target languages. Failures retain the source SRT, chunk exports and completed translation
-checkpoints. Ollama unload is requested after completion/failure. The default model choice remains
-yours; no translation model was benchmarked here.
+Translation uses the Codex integration. The unused Ollama route has been removed.
 
 The deployment defaults to cloud transcription; local transcription is optional.
 `TRANSCRIBE_BACKEND: 'local'` sends no audio to transcription providers. Legacy `auto` uses Groq
@@ -297,8 +299,10 @@ terminates the job's subprocess group on Linux.
 Cloud request checkpoints retain raw provider responses, remote IDs and usage. An uncertain
 submission blocks automatic resubmission; an accepted remote job can continue after local
 cancellation. Job Details links the usage report and supports changing the estimate allowance on
-retry. Use `scripts/reconcile-transcription.ts` only after checking the provider dashboard, as
-described in [the comparison guide](TRANSCRIPTION_COMPARISON.md).
+retry. Job Details exposes request status and reconciliation: attach an existing provider ID or
+explicitly authorize another attempt with a note. ElevenLabs transcript retrieval by ID is supported
+alongside AssemblyAI, Speechmatics and Gladia. The CLI provides the same recovery actions; see
+[the comparison guide](TRANSCRIPTION_COMPARISON.md).
 
 Raw regeneration requires an exact current-format manifest and every retained chunk's response:
 
@@ -313,12 +317,20 @@ separately until you deliberately migrate them.
 Manual diagnostics, to run only when wanted:
 
 ```bash
-.venv-whisper/bin/python scripts/test_faster_whisper.py --list
-.venv-whisper/bin/python scripts/test_faster_whisper.py --job JOB_ID --limit 3 --device cuda --compute-type float16
 node build/scripts/test_speech_detection.js short-clip.wav --save-report
 ```
 
-For the standalone Whisper diagnostic, export its CUDA library directory as `LD_LIBRARY_PATH` before
-launching Python, as in the upstream instructions; the Node launcher applies `WHISPER_LIBRARY_PATH`
-automatically. Spectral diagnostics are limited to ten-minute clips and two workers. No diagnostic
-was executed during this migration.
+Spectral diagnostics are limited to ten-minute clips and two workers.
+
+Before redeploying, **pause the queue and wait for active work and screening preparation to
+finish**. Shutdown stops new claims/submissions, then lets submitted transcription responses reach
+disk for up to `SHUTDOWN_GRACE_MS` (30 minutes by default). Set the container stop grace to at least
+31 minutes. A forced kill or elapsed grace still requires inspecting an uncertain request before
+retrying.
+
+Studio shows temporary, screening and raw-transcript storage. Job Details can remove a screening
+copy while retaining corrections and generated originals. Archive finished history after temporary
+cleanup to keep the active queue small; archived records remain in `data/job-archive/`. Logs live in
+`data/job-logs/`, and playback positions use small separate files. New jobs use portable data-root
+paths; legacy absolute-path checkpoints require deliberate migration. Preserve mtimes when copying
+source media so integrity checks still identify the original files.

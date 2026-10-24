@@ -6,9 +6,9 @@ faster-whisper are optional; Demucs is excluded. Direct ElevenLabs full-movie mo
 neural models. Faster-whisper is optional. The Python stages remain Python; the application,
 browser, orchestration, adapters, workers, and CLI tools are TypeScript.
 
-The ARM image still needs a target-host build and runtime check. The current batch audit uses static
-checks and isolated fixtures, without local builds or paid inference. Start with the
-[ARM batch operation guide](BATCH_OPERATIONS.md), then use the acceptance checklist below.
+GitHub Actions builds and smoke-tests the default cloud image on native ARM64 and x64 runners. The
+target host, real account login, media playback and paid providers still need acceptance. Start with
+the [ARM batch operation guide](BATCH_OPERATIONS.md), then use the acceptance checklist below.
 
 ## Native local Codex translation
 
@@ -51,8 +51,10 @@ was used for that validation.
 5. Use **one replica**. Set container naming to **Consistent name (no rolling updates)**, or use a
    custom container name. This app owns a file-backed queue and must stop before its replacement
    starts. The kernel lock refuses a second writer.
-6. Set **Stop Grace Period** to at least **30 seconds**. Use the image's built-in health check: it
-   calls `/health` inside the container and needs no curl installation.
+6. Set **Stop Grace Period** to at least **31 minutes** (longer than `SHUTDOWN_GRACE_MS` plus
+   cleanup). Pause the queue and wait for active work and screenings before every redeploy. Use the
+   image's built-in health check: it calls `/health` inside the container and needs no curl
+   installation.
 7. On a four-CPU ARM host, start with a two-CPU / 4 GiB application limit and log rotation. These
    are operating limits, not measured resource requirements. The Compose example sets these limits.
 8. Deploy, open the HTTPS URL, sign in, and add keys under **Connections**. Select the saved
@@ -71,7 +73,10 @@ CPU devices. Keep these defaults unless you deliberately change the deployment l
 
 The public origin is checked against the request Host and Origin. A mismatch returns 403. Arbitrary
 forwarded host headers are not trusted. TLS can terminate at Coolify; the session cookie is still
-marked Secure when `PUBLIC_ORIGIN` uses HTTPS. Local HTTP is allowed only for a loopback origin.
+marked Secure when `PUBLIC_ORIGIN` uses HTTPS. Local HTTP accepts localhost, 127.0.0.1 and ::1 on
+the configured port. Set `TRUSTED_PROXIES` to the actual reverse-proxy IPs/CIDRs so failed-login
+backoff uses each client address. Never use a blanket trust setting or allow direct clients to forge
+the trusted proxy source.
 
 For a subpath, set `BASE_PATH=/revival`, keep `PUBLIC_ORIGIN` as the origin alone, and forward
 `/revival/...` without stripping the prefix. `/health` stays at the root. A dedicated subdomain is
@@ -93,32 +98,37 @@ writable by UID/GID 10001 before starting. Do not mount over `/app`.
 The volume must be a local filesystem supporting advisory locks and atomic rename. Do not share it
 across multiple servers or replicas. Prefer the named volume to an NFS share.
 
-| Location inside `/data`         | Contents                                                        |
-| ------------------------------- | --------------------------------------------------------------- |
-| `data/processing-queue.json`    | Durable queue and scanner history                               |
-| `data/private/password.json`    | Salted scrypt password hash                                     |
-| `data/private/credentials.json` | AES-256-GCM encrypted connection values                         |
-| `data/private/master.key`       | Encryption key; must be backed up with the vault                |
-| `data/private/codex/`           | Container Codex login and refresh state                         |
-| `data/translation-receipts/`    | Durable Codex candidates, source copies and receipts            |
-| `data/subtitle-reviews/`        | Human corrections, paired timing, notes and generated baselines |
-| `data/subtitle-review-media/`   | Completed screening media identities                            |
-| `movies/`                       | Watched source films                                            |
-| `temp/`                         | Uploaded sources, vocal stems, profiles, recovery manifests     |
-| `output/`                       | Subtitles, translations, reviews, raw responses, comparisons    |
-| `found/`                        | Reused existing subtitles                                       |
-| `cache/`                        | Downloaded model weights and runtime caches                     |
-| `review-sessions/`              | Automatically prepared screening media; legacy static sessions  |
+| Location inside `/data`               | Contents                                                        |
+| ------------------------------------- | --------------------------------------------------------------- |
+| `data/processing-queue.json`          | Durable queue and scanner history                               |
+| `data/private/password.json`          | Salted scrypt password hash                                     |
+| `data/private/credentials.json`       | AES-256-GCM encrypted connection values                         |
+| `data/private/master.key`             | Encryption key; must be backed up with the vault                |
+| `data/private/codex/`                 | Container Codex login and refresh state                         |
+| `data/translation-receipts/`          | Durable Codex candidates, source copies and receipts            |
+| `data/subtitle-reviews/`              | Human corrections, paired timing, notes and generated baselines |
+| `data/job-logs/`, `data/job-archive/` | Per-job logs and explicitly archived history                    |
+| `data/subtitle-review-positions/`     | Small playback-position records                                 |
+| `data/subtitle-review-media/`         | Completed screening media identities                            |
+| `movies/`                             | Watched source films                                            |
+| `temp/`                               | Uploaded sources, original audio, profiles, recovery manifests  |
+| `output/`                             | Subtitles, translations, reviews, raw responses, comparisons    |
+| `found/`                              | Reused existing subtitles                                       |
+| `cache/`                              | Downloaded model weights and runtime caches                     |
+| `review-sessions/`                    | Automatically prepared screening media; legacy static sessions  |
 
 Back up the entire volume while jobs are stopped. The vault and encryption key are both in the
 volume: encryption protects the values in the JSON file, but does not protect them from someone who
 can read the whole volume or operate the server. Never publish the private directory. Losing
 `master.key` makes saved secrets unrecoverable; the application refuses to create a replacement for
-an existing vault.
+an existing vault. Alternatively, supply `CREDENTIALS_MASTER_KEY` as a 32-byte hex value from an
+external secret store; the app never writes it. If migrating an existing vault, use the exact
+original key and back it up separately before removing the colocated copy. The key is stripped from
+child environments.
 
-Do not copy an old queue into a new mount blindly: recovery manifests contain absolute audio paths.
-The original Windows source and outputs remain separate. Export old subtitles independently, or
-migrate paths deliberately before attempting to resume an old job.
+New jobs use `@data/` paths on disk and root-relative request signatures. Copy the complete volume
+while stopped, preserving source mtimes. Legacy manifests retain absolute paths and need deliberate
+migration; their paid identities are never silently rewritten.
 
 ## Credentials and password lifecycle
 
@@ -169,8 +179,8 @@ When YouTube changes again, update the pinned downloader in `requirements-downlo
 
 See [full-movie Scribe](FULL_MOVIE_SCRIBE.md) for API-key setup, request sizing, speaker metadata,
 and changing a paused pre-ASR job. File preparation uses bounded FFmpeg threads and upload streams
-from disk. This removes the local neural-model requirement; ARM image builds still need validation
-on the target host. No ARM build was run during this change.
+from disk. This removes the local neural-model requirement; CI validates image startup on both
+architectures; resource use on the target host remains a deployment check.
 
 The default is **direct ElevenLabs Scribe v2 on original audio**. Demucs is neither installed nor
 invoked. Automatic/Full movie streams one file and preserves native word timing. Chunked mode
@@ -240,3 +250,10 @@ These checks are for the owner to run after deployment:
       [provider comparison checks](TRANSCRIPTION_COMPARISON.md), including timing, low-volume
       dialogue, original offsets, translation round trips, cancellation, and uncertain billing
       recovery.
+
+Screening preparation is a separate low-priority worker and does not block the ASR queue or pause it
+on failure. Its deadline scales with media duration. Re-downloads used only to prepare a screening
+are removed once the durable screening exists. Studio displays persistent media use; Job Details can
+remove screening copies without deleting corrections, and finished history can be archived.
+Diagnostic transcript text is omitted from stdout unless `LOG_TRANSCRIPT_TEXT=true` is explicitly
+set.

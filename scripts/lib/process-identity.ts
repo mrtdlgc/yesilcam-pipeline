@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { acquireInstanceLock } from './instance-lock.js';
 
 interface ProcessIdentity {
   version: 2;
@@ -49,5 +50,36 @@ export async function processLockIsLive(contents: string): Promise<boolean> {
   } catch (error) {
     if (error.code === 'ENOENT' || error.code === 'ESRCH') return false;
     throw error; // Permission/read errors never authorize unlocking.
+  }
+}
+
+export async function acquireProcessLock(file: string) {
+  // A kernel guard serializes stale-file replacement across the server and CLIs.
+  const release = await acquireInstanceLock(`${file}.guard`);
+  try {
+    const contents = await fs.readFile(file, 'utf8').catch((error) => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    if (contents !== null) {
+      if (await processLockIsLive(contents)) throw new Error('A live process owns this request');
+      await fs.unlink(file);
+    }
+    const handle = await fs.open(file, 'wx', 0o600);
+    try {
+      await handle.writeFile(await processLockContents());
+    } finally {
+      await handle.close();
+    }
+    return async () => {
+      try {
+        await fs.rm(file, { force: true });
+      } finally {
+        await release();
+      }
+    };
+  } catch (error) {
+    await release();
+    throw error;
   }
 }

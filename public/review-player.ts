@@ -340,7 +340,8 @@ async function initialize() {
     return startEditor(parameters.get('job')!);
   }
   document.querySelector('#filter option[value="changed"]')?.remove();
-  const id = parameters.get('session') ?? 'ah-nerede-first-half';
+  const id = parameters.get('session');
+  if (!id) throw new Error('Open a film using Watch & correct in the studio.');
   if (!/^[a-z0-9_-]{1,80}$/.test(id)) throw new Error('Invalid screening ID');
   const root = new URL(`./review-sessions/${id}/`, location.href);
   const response = await fetch(new URL('session.json', root));
@@ -480,7 +481,7 @@ async function initialize() {
     }
     const time = value.split(':').reduce((total, part) => total * 60 + Number(part), 0);
     if (time >= session.duration) {
-      status('That time is outside this first-half screening.', true);
+      status('That time is outside this screening.', true);
       return;
     }
     loop.checked = false;

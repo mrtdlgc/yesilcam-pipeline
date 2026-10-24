@@ -12,6 +12,7 @@ export const config = {
   // Auto falls back to Groq only when ALLOW_CLOUD_FALLBACK is explicitly enabled.
   TRANSCRIBE_BACKEND: process.env.TRANSCRIBE_BACKEND || 'elevenlabs', // Direct Scribe streams the full film
   TRANSCRIPTION_MODEL: process.env.TRANSCRIPTION_MODEL || '', // Empty selects the provider's documented default
+  PORTABLE_PATHS: true, // New checkpoints use DATA_DIR-relative identities
   TRANSCRIPTION_MODE: 'auto', // auto: full movie for direct ElevenLabs, chunks for other providers
   TRANSCRIPTION_DIARIZATION: true, // Scribe only; anonymous speakers remain scoped to each request
   MOVIE_TRANSCRIPTION_TIMEOUT_MS: 30 * 60 * 1000,
@@ -39,6 +40,7 @@ export const config = {
   ALLOW_CLOUD_FALLBACK: false, // auto stays local unless explicitly enabled
   WORKER_START_TIMEOUT_MS: Number(process.env.WORKER_START_TIMEOUT_MS || 300000),
   TRANSCRIPTION_TIMEOUT_MS: 300000,
+  SHUTDOWN_GRACE_MS: Number(process.env.SHUTDOWN_GRACE_MS || 30 * 60 * 1000),
   MEDIA_TIMEOUT_MS: Number(process.env.MEDIA_TIMEOUT_MS || 3600000),
   MAX_INPUT_DURATION_SEC: Number(process.env.MAX_INPUT_DURATION_SEC || 4 * 60 * 60),
   MAX_UPLOAD_BYTES: Number(process.env.MAX_UPLOAD_BYTES || 2 * 1024 * 1024 * 1024),
@@ -77,6 +79,7 @@ export const config = {
   // Hallucination filter - removes Whisper hallucinations using audio energy
   // Checks: seek position, no_speech_prob, compression_ratio, duration, energy
   FILTER_HALLUCINATIONS: true,
+  LOG_TRANSCRIPT_TEXT: process.env.LOG_TRANSCRIPT_TEXT === 'true',
   HALLUCINATION_DROP_THRESHOLD: 4, // Score >= this = drop segment
   HALLUCINATION_MARK_THRESHOLD: 2, // Score >= this = mark suspicious
 
@@ -127,13 +130,10 @@ export const config = {
 
   // === Subtitle translation ===
   TRANSLATION_ENABLED: process.env.TRANSLATION_ENABLED === 'true',
-  TRANSLATION_PROVIDER: 'codex-local', // codex-local (ChatGPT login) or ollama
+  TRANSLATION_PROVIDER: 'codex-local', // Local Codex CLI with ChatGPT login
   CODEX_BIN: process.env.CODEX_BIN || 'codex',
   CODEX_MODEL: process.env.CODEX_MODEL || '', // Empty uses the installed CLI default
   CODEX_TRANSLATION_TIMEOUT_MS: Number(process.env.CODEX_TRANSLATION_TIMEOUT_MS || 30 * 60 * 1000),
-  OLLAMA_URL: 'http://localhost:11434',
-  OLLAMA_MODEL: 'llama3.1:8b', // Default model (user configurable)
-  OLLAMA_FALLBACK_MODEL: null as string | null, // Fallback model if primary fails (null = no fallback)
   TRANSLATION_CONTEXT_WINDOW: 5, // Sentences before/after for context
   TRANSLATION_BATCH_SIZE: 10, // Sentences per LLM request
   TRANSLATION_RETRY_ATTEMPTS: 3, // Retry failed translations

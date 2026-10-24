@@ -48,6 +48,18 @@ export function credentialName(name: string): CredentialName {
 export async function initializeCredentials(): Promise<void> {
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   await fs.chmod(directory, 0o700);
+  if (process.env.CREDENTIALS_MASTER_KEY) {
+    if (!/^[a-fA-F0-9]{64}$/.test(process.env.CREDENTIALS_MASTER_KEY))
+      throw new Error('CREDENTIALS_MASTER_KEY must be 32 bytes encoded as hex');
+    masterKey = Buffer.from(process.env.CREDENTIALS_MASTER_KEY, 'hex');
+    const existing = await fs.readFile(keyFile).catch((error) => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    if (existing && !existing.equals(masterKey))
+      throw new Error('External vault key differs from the existing key; restore the original key');
+    return;
+  }
   try {
     masterKey = await fs.readFile(keyFile);
   } catch (error) {

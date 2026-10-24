@@ -1,3 +1,4 @@
+import { lowerBound } from './sorted.js';
 import type { Segment } from '../../types/pipeline.js';
 import type { Interval } from './audio.js';
 import { config } from '../../config.js';
@@ -15,10 +16,19 @@ export function alignSegments(
 ) {
   const starts = intervals.map((s) => s.start),
     ends = intervals.map((s) => s.end);
-  const nearest = (points: number[], value: number) =>
-    points
-      .filter((p) => Math.abs(p - value) <= maxShift)
+  starts.sort((a, b) => a - b);
+  ends.sort((a, b) => a - b);
+  const ordered = [...intervals].sort((a, b) => a.start - b.start);
+  const prefixEnd: number[] = [];
+  ordered.forEach((interval, index) =>
+    prefixEnd.push(Math.max(interval.end, prefixEnd[index - 1] ?? 0)),
+  );
+  const nearest = (points: number[], value: number) => {
+    const index = lowerBound(points, value, (point) => point);
+    return [points[index - 1], points[index]]
+      .filter((point) => point !== undefined && Math.abs(point - value) <= maxShift)
       .sort((a, b) => Math.abs(a - value) - Math.abs(b - value))[0];
+  };
   return segments.map((seg) => {
     // Search both directions: early starts and late ends need inward adjustment.
     const start = nearest(starts, seg.start),
@@ -28,10 +38,18 @@ export function alignSegments(
       start: start === undefined ? seg.start : Math.max(0, start - padding),
       end: end === undefined ? seg.end : Math.min(duration, end + padding),
     };
-    const coverage = intervals.reduce(
-      (sum, p) => sum + Math.max(0, Math.min(seg.end, p.end) - Math.max(seg.start, p.start)),
-      0,
-    );
+    let coverage = 0;
+    for (
+      let i = lowerBound(prefixEnd, seg.start, (value) => value);
+      i < ordered.length && ordered[i].start < seg.end;
+      i++
+    ) {
+      const interval = ordered[i];
+      coverage += Math.max(
+        0,
+        Math.min(seg.end, interval.end) - Math.max(seg.start, interval.start),
+      );
+    }
     if (candidate.end - candidate.start < 0.001) {
       candidate = addReview({ ...seg }, 'alignment_conflict');
     }

@@ -21,10 +21,7 @@
 body {
   margin: 0;
 }
-button,
-input,
-select,
-textarea {
+:is(button, input, select, textarea) {
   font: inherit;
 }
 button,
@@ -39,7 +36,7 @@ button {
   cursor: pointer;
 }
 button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.55;
 }
 a {
@@ -97,10 +94,9 @@ summary:focus-visible,
   outline: 3px solid #9c804d;
   outline-offset: 4px;
 }
-input,
-select,
-textarea {
+:is(input, select, textarea) {
   width: 100%;
+  min-width: 0;
   border: 1px solid #cfd4c8;
   border-radius: 8px;
   background: #fffefa;
@@ -134,7 +130,7 @@ label {
 }
 small,
 .optional {
-  font-size: 0.73rem;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 [hidden],
@@ -203,7 +199,7 @@ small,
   transform: translateY(6px);
 }
 .sidebar-caption {
-  font-size: 9px;
+  font-size: 12px;
   letter-spacing: 0.18em;
   color: #9faa97;
   margin: 52px 0 20px;
@@ -224,12 +220,11 @@ small,
   font-size: 0.85rem;
 }
 .nav-item span {
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   opacity: 0.6;
   font-variant-numeric: tabular-nums;
 }
-.nav-item:hover,
-.nav-item.active {
+.nav-item:is(:hover, .active) {
   background: #304337;
   color: #fff8e7;
 }
@@ -282,7 +277,7 @@ small,
   align-items: center;
   justify-content: space-between;
   gap: 15px;
-  font-size: 9px;
+  font-size: 12px;
   letter-spacing: 0.14em;
   color: var(--muted);
 }
@@ -291,7 +286,7 @@ small,
   align-items: center;
   gap: 8px;
   letter-spacing: 0;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
 }
 .session-badge i {
   width: 6px;
@@ -307,7 +302,7 @@ small,
   padding: 55px 0 42px;
 }
 .eyebrow {
-  font-size: 0.62rem;
+  font-size: 0.75rem;
   letter-spacing: 0.18em;
   font-weight: 650;
   color: #78816f;
@@ -351,7 +346,7 @@ small,
   font-weight: 400;
 }
 .film-frame small {
-  font-size: 6px;
+  font-size: 12px;
   letter-spacing: 0.18em;
   color: #d6dfc7;
 }
@@ -391,7 +386,7 @@ small,
   height: 32px;
   background: #eef0e6;
   color: #7c886d;
-  font-size: 10px;
+  font-size: 12px;
   border-radius: 50%;
 }
 .panel-heading p {
@@ -451,7 +446,7 @@ small,
   font-weight: 550;
 }
 .drop-zone > span:not(.upload-symbol) {
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   color: var(--muted);
   line-height: 1.5;
 }
@@ -471,18 +466,18 @@ small,
   opacity: 0.85;
 }
 .field-note {
-  font-size: 0.71rem;
+  font-size: 0.75rem;
   color: var(--muted);
   line-height: 1.6;
   margin-bottom: 18px;
 }
 .field-pair {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 15px;
 }
 .provider-note {
-  font-size: 0.71rem;
+  font-size: 0.75rem;
   line-height: 1.65;
   border-left: 2px solid #bac9a8;
   padding-left: 12px;
@@ -516,7 +511,7 @@ details.panel > summary {
 }
 .check-row small {
   display: block;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   line-height: 1.6;
   margin: 5px 0 13px;
 }
@@ -546,7 +541,7 @@ details.panel > summary {
 .btn-danger {
   display: inline-block;
   text-decoration: none;
-  font-size: 0.73rem;
+  font-size: 0.75rem;
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 8px 12px;
@@ -557,8 +552,7 @@ details.panel > summary {
 .btn-secondary:hover {
   background: #eff1e7;
 }
-.btn-danger,
-.btn-warning {
+:is(.btn-danger, .btn-warning) {
   color: #974a38;
 }
 .btn-danger {
@@ -660,7 +654,7 @@ details.panel > summary {
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 4px 12px;
-  font-size: 0.73rem;
+  font-size: 0.75rem;
 }
 .stage-heading strong {
   font-weight: 600;
@@ -707,7 +701,7 @@ details.panel > summary {
   opacity: 0.55;
 }
 .pipeline-stage .stage-detail {
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   margin: 0;
   line-height: 1.4;
   overflow-wrap: anywhere;
@@ -744,14 +738,9 @@ details.panel > summary {
     grid-template-columns: 1fr;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .pipeline-stage progress::-webkit-progress-value {
-    transition: none;
-  }
-}
 .upload-progress {
   width: 100%;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 .page-intro {
@@ -778,11 +767,11 @@ details.panel > summary {
   margin-bottom: 8px;
 }
 .scanner-stats span {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 .scanner-badge {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 .library-row {
@@ -838,7 +827,7 @@ details.panel > summary {
   margin-bottom: 20px;
 }
 .connection-badge {
-  font-size: 0.62rem;
+  font-size: 0.75rem;
   background: #edf0e5;
   padding: 5px 8px;
   border-radius: 12px;
@@ -849,7 +838,7 @@ details.panel > summary {
   color: #877b64;
 }
 .connection-feedback {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--muted);
   min-height: 1.4em;
   margin: 8px 0 0;
@@ -868,7 +857,7 @@ details.panel > summary {
   border-top: 1px solid var(--line);
   margin-top: 45px;
   padding: 25px 0;
-  font-size: 0.64rem;
+  font-size: 0.75rem;
   color: #7b8275;
   letter-spacing: 0.06em;
 }
@@ -902,8 +891,7 @@ details.panel > summary {
   background: #0e211bb8;
   backdrop-filter: blur(5px);
 }
-.modal-header,
-.modal-footer {
+:is(.modal-header, .modal-footer) {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -979,7 +967,7 @@ details.panel > summary {
 .login-story .eyebrow,
 .login-footnote {
   color: #b6c5aa;
-  font-size: 9px;
+  font-size: 12px;
   letter-spacing: 0.16em;
 }
 .login-story p:last-child {
@@ -1057,7 +1045,7 @@ details.panel > summary {
     gap: 10px;
   }
   .topbar > span:first-child {
-    font-size: 8px;
+    font-size: 12px;
   }
   .hero h1 {
     font-size: 3.5rem;
@@ -1111,7 +1099,7 @@ details.panel > summary {
     font-size: 18px;
   }
   .brand small {
-    font-size: 7px;
+    font-size: 12px;
   }
   .sidebar nav {
     display: grid;
@@ -1120,7 +1108,7 @@ details.panel > summary {
     margin-top: 20px;
   }
   .nav-item {
-    font-size: 0.68rem;
+    font-size: 0.75rem;
     justify-content: center;
     padding: 10px 2px;
   }
@@ -1134,7 +1122,7 @@ details.panel > summary {
     right: 20px;
     top: 23px;
     padding: 8px 10px;
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     gap: 12px;
   }
   .workspace {
@@ -1148,7 +1136,7 @@ details.panel > summary {
     line-height: 1.6;
   }
   .session-badge {
-    font-size: 0.62rem;
+    font-size: 0.75rem;
   }
   .hero {
     padding: 38px 0 30px;
@@ -1181,7 +1169,7 @@ details.panel > summary {
     padding: 38px 0 20px;
   }
   .workspace-footer {
-    font-size: 0.55rem;
+    font-size: 0.75rem;
   }
   .modal-body {
     padding: 19px;
@@ -1212,10 +1200,13 @@ details.panel > summary {
     font-size: 32px;
   }
   .login-form-panel .eyebrow {
-    font-size: 8px;
+    font-size: 12px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .pipeline-stage progress::-webkit-progress-value {
+    transition: none;
+  }
   *,
   *::before,
   *::after {
@@ -1223,4 +1214,8 @@ details.panel > summary {
     animation: none !important;
     scroll-behavior: auto !important;
   }
+}
+
+button[data-busy] {
+  cursor: wait;
 }

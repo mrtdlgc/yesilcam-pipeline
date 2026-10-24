@@ -1,4 +1,3 @@
-import type { Chunk } from '../types/pipeline.js';
 import type { PipelineOptions } from '../types/pipeline.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -6,7 +5,7 @@ import { config } from '../config.js';
 import { at, jobId as validateId } from './lib/files.js';
 import { probe, run, checkAbort } from './lib/process.js';
 import { energyProfile } from './lib/audio.js';
-import { parseSrt, segmentsToSrt } from './lib/srt.js';
+import { timeRange } from './lib/sorted.js';
 
 // Energy chooses cut points; Demucs and Silero handle speech/music afterwards.
 // The spectral classifier remains an explicitly separate diagnostic script.
@@ -29,7 +28,11 @@ export function calculateChunkBoundariesForRegion(
     if (remaining <= max) end = region.end;
     else if (remaining < max + min) end = start + remaining / 2;
     else {
-      const candidates = profile.filter((p: any) => p.time >= start + min && p.time <= start + max);
+      const candidates = timeRange<{ time: number; energy: number }>(
+        profile,
+        start + min,
+        start + max,
+      );
       const quiet = candidates.filter((p: any) => p.energy < threshold);
       const selected = (quiet.length ? quiet : candidates).reduce((best: any, p: any) => {
         const score = quiet.length ? Math.abs(p.time - start - target) : p.energy;
@@ -90,9 +93,14 @@ export async function chunkAudio(inputFile: string, id: any, options: PipelineOp
     calculateChunkBoundariesForRegion(region, profile, threshold, settings),
   );
   const chunks = [];
+  // Existing manifests retain their original WAVs and request identities.
+  const compact = settings.TRANSCRIBE_BACKEND !== 'local' && settings.TRANSCRIBE_BACKEND !== 'auto';
   for (const [index, bounds] of boundaries.entries()) {
     checkAbort(options.signal);
-    const file = path.join(workDir, `chunk_${String(index).padStart(5, '0')}.wav`);
+    const file = path.join(
+      workDir,
+      `chunk_${String(index).padStart(5, '0')}.${compact ? 'flac' : 'wav'}`,
+    );
     // Accurate input seeking decodes/discards up to the cut, without repeatedly
     // decoding the entire film prefix. Resampling retains timestamped audio gaps.
     await run(
@@ -115,11 +123,12 @@ export async function chunkAudio(inputFile: string, id: any, options: PipelineOp
         '-af',
         'aresample=async=1:first_pts=0,apad',
         '-ar',
-        rate,
+        compact ? 16000 : rate,
         '-ac',
-        channels,
+        compact ? 1 : channels,
         '-c:a',
-        'pcm_f32le',
+        compact ? 'flac' : 'pcm_f32le',
+        ...(compact ? ['-sample_fmt', 's16'] : []),
         file,
       ],
       { signal: options.signal, timeout: settings.MEDIA_TIMEOUT_MS },
@@ -128,15 +137,4 @@ export async function chunkAudio(inputFile: string, id: any, options: PipelineOp
     await options.onProgress?.(index + 1, boundaries.length);
   }
   return chunks;
-}
-export function mergeSrtFiles(chunks: Chunk[]) {
-  return segmentsToSrt(
-    chunks.flatMap((chunk: Chunk) =>
-      parseSrt(chunk.srt).map((seg) => ({
-        ...seg,
-        start: seg.start + chunk.startTime,
-        end: seg.end + chunk.startTime,
-      })),
-    ),
-  );
 }

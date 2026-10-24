@@ -20,7 +20,7 @@ export async function energyProfile(
     hop = 200;
   let carry = Buffer.alloc(0),
     position = 0;
-  const profile: EnergyFrame[] = [];
+  const profile: { time: number; [field: string]: number }[] = [];
   await run(
     'ffmpeg',
     [
@@ -67,7 +67,7 @@ export async function energyProfile(
   return profile;
 }
 export function intervalsFromProfile(
-  profile: EnergyFrame[],
+  profile: { time: number; [field: string]: number }[],
   {
     field = 'energy',
     startThreshold,

@@ -2,8 +2,8 @@ import type { PipelineOptions } from '../types/pipeline.js';
 import { probe } from './lib/process.js';
 import { config } from '../config.js';
 
-// Preserve the native-rate source. Chunk extraction creates lossless PCM.
-export async function extractAndOptimizeAudio(
+// Validate source duration without modifying the media.
+export async function validateSourceMedia(
   inputFile: string,
   jobId: any,
   options: PipelineOptions = {},

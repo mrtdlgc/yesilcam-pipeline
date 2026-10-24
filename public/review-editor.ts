@@ -125,8 +125,25 @@ export async function startEditor(id: string) {
     const edit = pending.get(cue.id)?.edit;
     return edit ? { ...cue, ...edit, texts: { ...cue.texts, ...edit.texts }, changed: true } : cue;
   };
-  const cues = () =>
-    document.cues.map(effective).sort((a, b) => a.start - b.start || Number(a.id) - Number(b.id));
+  let cachedCues: Cue[] = [],
+    cachedSource: Cue[] | undefined,
+    cachedGeneration = -1,
+    cachedPending = -1;
+  const cues = () => {
+    if (
+      cachedSource !== document.cues ||
+      cachedGeneration !== generation ||
+      cachedPending !== pending.size
+    ) {
+      cachedSource = document.cues;
+      cachedGeneration = generation;
+      cachedPending = pending.size;
+      cachedCues = document.cues
+        .map(effective)
+        .sort((a, b) => a.start - b.start || Number(a.id) - Number(b.id));
+    }
+    return cachedCues;
+  };
   const current = () => effective(document.cues.find((cue) => cue.id === selected)!);
   function recovery(message: string, conflict = false) {
     $('draftRecovery').hidden = false;
@@ -207,7 +224,9 @@ export async function startEditor(id: string) {
   }
   function renderCaptions() {
     if (!captionTrack) return;
-    for (const cue of Array.from(captionTrack.cues ?? [])) captionTrack.removeCue(cue);
+    const existing = new Map(
+      Array.from(captionTrack.cues ?? []).map((cue) => [cue.id, cue as VTTCue]),
+    );
     for (const cue of cues()) {
       if (
         cue.omitted ||
@@ -219,10 +238,26 @@ export async function startEditor(id: string) {
       )
         continue;
       // Native caption markup is parsed by the browser, never inserted as page HTML.
+      const saved = existing.get(cue.id);
+      existing.delete(cue.id);
+      if (
+        saved &&
+        saved.startTime === cue.start &&
+        saved.endTime === cue.end &&
+        saved.text === cue.texts[language]
+      )
+        continue;
+      if (saved) {
+        saved.startTime = cue.start;
+        saved.endTime = cue.end;
+        saved.text = cue.texts[language];
+        continue;
+      }
       const caption = new VTTCue(cue.start, cue.end, cue.texts[language]);
       caption.id = cue.id;
       captionTrack.addCue(caption);
     }
+    for (const cue of existing.values()) captionTrack.removeCue(cue);
     captionTrack.mode = input('showSubtitles').checked ? 'showing' : 'hidden';
   }
   function renderList() {

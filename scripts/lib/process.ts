@@ -1,5 +1,6 @@
 import './environment.js';
 import { spawn } from 'node:child_process';
+import { setPriority } from 'node:os';
 import { StringDecoder } from 'node:string_decoder';
 import type { ChildProcess } from 'node:child_process';
 import type { Settings } from '../../types/pipeline.js';
@@ -8,6 +9,16 @@ export const PYTHON =
   process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3');
 export const WHISPER_PYTHON = () =>
   process.env.WHISPER_PYTHON_BIN || process.env.PYTHON_BIN || PYTHON;
+const children = new Set<ChildProcess>();
+export function trackChild<T extends ChildProcess>(child: T): T {
+  children.add(child);
+  child.once('close', () => children.delete(child));
+  return child;
+}
+export function terminateChildren() {
+  for (const child of children) terminate(child);
+}
+process.once('exit', terminateChildren);
 export function abortError() {
   return Object.assign(new Error('Job cancelled'), { name: 'AbortError' });
 }
@@ -17,7 +28,7 @@ export function checkAbort(signal?: AbortSignal) {
 export function childEnvironment(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const env = { ...process.env, ...extra };
   for (const name of Object.keys(env))
-    if (/API_KEY|TOKEN|PASSWORD|SECRET|YOUTUBE_COOKIES/i.test(name)) delete env[name];
+    if (/API_KEY|MASTER_KEY|TOKEN|PASSWORD|SECRET|YOUTUBE_COOKIES/i.test(name)) delete env[name];
   return env;
 }
 export function terminate(child?: ChildProcess | null) {
@@ -37,6 +48,7 @@ export interface RunOptions {
   maxOutput?: number;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  priority?: number;
   input?: string | Uint8Array;
   onStderr?: (message: string) => void;
   onStdout?: (chunk: Buffer) => void;
@@ -53,17 +65,35 @@ export function run(
     cwd,
     input,
     onStdout,
+    priority,
   }: RunOptions = {},
 ): Promise<{ stdout: string; stderr: string }> {
   checkAbort(signal);
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args.map(String), {
-      shell: false,
-      cwd,
-      env: childEnvironment(env),
-      detached: process.platform !== 'win32',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    // Every media input is local. Playlists must never open network protocols.
+    if (['ffmpeg', 'ffprobe'].includes(command)) {
+      const restricted: (string | number)[] = [];
+      for (const arg of args) {
+        if (arg === '-i') restricted.push('-protocol_whitelist', 'file,pipe');
+        restricted.push(arg);
+      }
+      if (command === 'ffprobe') restricted.unshift('-protocol_whitelist', 'file,pipe');
+      args = restricted;
+    }
+    const child = trackChild(
+      spawn(command, args.map(String), {
+        shell: false,
+        cwd,
+        env: childEnvironment(env),
+        detached: process.platform !== 'win32',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }),
+    );
+    if (priority !== undefined && child.pid) {
+      try {
+        setPriority(child.pid, priority);
+      } catch {}
+    }
     let stdout = '',
       stderr = '',
       failure: unknown,

@@ -1,3 +1,6 @@
+> Historical record of the earlier implementation. For current behavior, use
+> [README](../../README.md) and [deployment](../../DEPLOYMENT.md).
+
 # YEŞİLÇAM REVIVAL — IMPLEMENTATION HANDOFF
 
 > Historical report for the original local-app audit on 2026-10-23. The verification counts and
@@ -5,9 +8,8 @@
 > loopback-only deployment and JavaScript setup. See [Deployment](DEPLOYMENT.md) and
 > [current validation](MIGRATION.md). 2026-10-23
 
-Working checkout: /home/mrtdlgc/repos/yesilcam-pipeline Original preserved:
-/media/mrtdlgc/Windows-C/Users/mrtdl/Downloads/yesilcam-pipeline Audit evidence:
-/home/mrtdlgc/output/yesilcam-audit-2026-10-23
+Working checkout: [local evidence directory] Original preserved: [original local archive] Audit
+evidence: [local evidence directory]
 
 This is a source-level remediation of the 27 audit findings and the subsequent audio-path review.
 Runtime acceptance remains for the owner's manual checks. No build, application test, model

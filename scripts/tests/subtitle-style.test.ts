@@ -4,23 +4,21 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { after, test } from 'node:test';
-import {
+
+const root = await fs.mkdtemp(path.join(os.tmpdir(), 'yesilcam-style-'));
+process.env.DATA_DIR = root;
+const {
   formatSubtitleDocument,
   subtitlesToAss,
   subtitleStyleReport,
   visibleLength,
   visibleText,
   wrapSubtitle,
-} from '../lib/subtitle-style.js';
-import {
-  validateCodexTranslation,
-  translateWithCodex,
-  codexPrompt,
-} from '../lib/codex-translation.js';
-import { parseSrt } from '../lib/srt.js';
-import { run } from '../lib/process.js';
-
-const root = await fs.mkdtemp(path.join(os.tmpdir(), 'yesilcam-style-'));
+} = await import('../lib/subtitle-style.js');
+const { validateCodexTranslation, translateWithCodex, codexPrompt } =
+  await import('../lib/codex-translation.js');
+const { parseSrt } = await import('../lib/srt.js');
+const { run } = await import('../lib/process.js');
 after(() => fs.rm(root, { recursive: true, force: true }));
 const text = 'Seni burada göreceğimi bilmiyordum ama geldiğine gerçekten çok sevindim.';
 const words = (value: string) => visibleText(value).replace(/\s+/gu, ' ').trim();

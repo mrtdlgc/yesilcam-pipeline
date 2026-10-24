@@ -6,7 +6,6 @@ import { config } from '../config.js';
 import { leaf, contained, readJson, writeJson, atomicWrite, serialized } from './lib/files.js';
 import { parseSrt, segmentsToSrt, parseTime, formatTimestamp } from './lib/srt.js';
 export { parseSrt } from './lib/srt.js';
-export const segmentsToSrtContent = segmentsToSrt;
 
 export function validTranslation(text: string) {
   return (
@@ -160,15 +159,6 @@ export async function importTranslation(folder: string, filename: string, data: 
     await writeJson(file, { metadata: saved.metadata, entries });
     return { entries: entries.length };
   });
-}
-
-export async function importSlimTranslation(fullJsonPath: any, slimJsonPath: any) {
-  return importTranslation(
-    path.dirname(fullJsonPath),
-    path.basename(fullJsonPath),
-    await readJson(slimJsonPath),
-    true,
-  );
 }
 
 export async function mergeTranslatedChunks(jsonFiles: any, outputPath: string) {

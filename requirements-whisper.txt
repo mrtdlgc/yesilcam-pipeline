@@ -1,4 +1,4 @@
-# CTranslate2 and its CUDA 12 libraries are isolated from Demucs/PyTorch CUDA 13.
+# CPU Docker builds share /opt/audio with Silero. Native CUDA installs should use a separate venv for CTranslate2 libraries.
 faster-whisper==1.2.1
 ctranslate2==4.8.3
 numpy==2.2.6

@@ -1,3 +1,6 @@
+> Historical record of the earlier implementation. For current behavior, use
+> [README](../../README.md) and [deployment](../../DEPLOYMENT.md).
+
 # TypeScript and deployment migration
 
 Implemented 2026-10-23–24 for a CPU Coolify host using cloud transcription.
@@ -34,8 +37,8 @@ operations; a change of endpoint, region, model, or audio can invalidate a recov
 of silently reusing a different request.
 
 The original recovered checkout and output files were not changed. This goal's starting working tree
-was separately snapshotted under `/home/mrtdlgc/output/yesilcam-deployment-2026-10-23/before` with a
-SHA-256 manifest. Nothing was pushed or deployed.
+was separately snapshotted under [local evidence directory] with a SHA-256 manifest. Nothing was
+pushed or deployed.
 
 ## Verification performed
 
@@ -56,8 +59,8 @@ Small Node development dependencies were installed with lifecycle scripts disabl
 and formatting. The host uses Node 22; the image selects Node 24. No build output was emitted
 locally.
 
-Local evidence is under `/home/mrtdlgc/output/yesilcam-deployment-2026-10-23/`, including
-`typecheck.log`, `source-checks.json`, `npm-production-audit.json`, and the starting snapshot.
+Local evidence is under [local evidence directory], including `typecheck.log`, `source-checks.json`,
+`npm-production-audit.json`, and the starting snapshot.
 
 ## Verification reserved for deployment
 
