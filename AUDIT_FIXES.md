@@ -121,12 +121,19 @@ remains a historical snapshot. Runtime media, credentials and account state are 
 - `npm ci --ignore-scripts`: clean lockfile install, no reported vulnerabilities.
 - `npm run typecheck`, `npm run build`, `npm run format:check`, generated provider-doc check and
   `git diff --check`: passed. The production build excludes test fixtures.
-- Full automated suite: 83 tests passed, including submitted-request shutdown and retry without a
-  second POST. A further real-server scanner regression checks stable versus growing files.
+- Full automated suite: **84 tests passed on both native x64 and ARM64 runners**, including
+  submitted-request shutdown and retry without a second POST, and a real-server scan of stable
+  versus growing files. Local checks passed the original 83-test run plus the added scanner test and
+  the final 16-test recovery regression subset.
 - Isolated headless Chrome check: login redirects, polling focus, existing-ID recovery, translation
   pagination, encoding selection, desktop/mobile layout, saved correction reload and media playback
   passed with no page errors. No real account or provider was used.
-- The native ARM64/x64 CI image-build result will be recorded after the private push.
+- [GitHub Actions run 40131087378](https://github.com/mrtdlgc/yesilcam-pipeline/actions/runs/40131087378)
+  passed for source commit `3d6efaa42be37075c45e96e4cf1dc08043313b66`. Both native jobs passed
+  dependency installation, types, formatting, provider-doc synchronization, tests and the production
+  build. Both also built the default cloud Docker image, started it, verified `/health`, checked
+  unauthenticated API rejection, ran the packaged Codex CLI, confirmed tests are absent from the
+  image and stopped the container. Optional local-neural-model images were not built.
 
 No paid transcription, Codex inference, model download, or production deployment is part of this
 remediation. Live provider contracts and target-host acceptance remain operational checks.
