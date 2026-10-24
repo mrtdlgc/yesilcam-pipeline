@@ -1,15 +1,11 @@
-# Yesilcam Pipeline Python Dependencies
-# Install with: pip install -r requirements.txt
-
-# Core transcription (required for local Whisper)
-faster-whisper>=1.0.0
-
-# Silero VAD - Speech Activity Detection (optional but recommended)
-# Used to filter non-speech chunks before transcription
-torch>=2.0.0
-torchaudio>=2.0.0
-# Note: silero-vad is loaded from torch hub, no pip install needed
-
-# Demucs - Audio Source Separation (optional but recommended)
-# Extracts vocals and removes background music/noise
-demucs>=4.0.0
+# Optional local audio runtime pins. The default cloud image only uses requirements-download.txt.
+# Enable INSTALL_LOCAL_AUDIO=true to include these. Python 3.12; install wheels only.
+# Python installation, model downloads and inference are reserved for deployment.
+torch==2.14.1
+silero-vad==6.2.3
+numpy==2.2.6
+scipy==1.15.3
+# CPU PyTorch runs Silero; source audio is decoded with ffmpeg.
+# Demucs and its separator models are no longer part of the runtime.
+# These are direct pins, not a complete transitive/environment lock.
+# Install requirements-whisper.txt in a separate environment for CTranslate2 CUDA 12.

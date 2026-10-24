@@ -1,237 +1,502 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Yeşilçam Subtitle Pipeline</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <div class="container">
-    <header>
-      <h1>🎬 Yeşilçam Subtitle Pipeline</h1>
-      <p>Automated subtitle generation for classic Turkish cinema</p>
-    </header>
-
-    <div class="main-content">
-      <!-- Submit Form -->
-      <section class="submit-section">
-        <h2>Submit New Job</h2>
-
-        <!-- Tab Buttons -->
-        <div class="tab-buttons">
-          <button class="tab-btn active" data-tab="upload">Upload Audio</button>
-          <button class="tab-btn" data-tab="youtube">YouTube URL</button>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#192b25" />
+    <title>Yeşilçam Revival · Restoration studio</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <a href="#main" class="skip-link">Skip to workspace</a>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a href="#studio" class="brand" aria-label="Yeşilçam Revival home"
+          ><span class="brand-mark">Y<span>R</span></span
+          ><span>YEŞİLÇAM<small>REVIVAL</small></span></a
+        >
+        <p class="sidebar-caption">THE RESTORATION STUDIO</p>
+        <nav aria-label="Workspace">
+          <button class="nav-item active" data-view="studio" aria-current="page">
+            <span>01</span> Studio
+          </button>
+          <button class="nav-item" data-view="library"><span>02</span> Film library</button>
+          <button class="nav-item" data-view="translations"><span>03</span> Translations</button>
+          <button class="nav-item" data-view="connections"><span>04</span> Connections</button>
+        </nav>
+        <div class="sidebar-note">
+          <span class="tiny-rule"></span>
+          <p>Old films.<br />New audiences.</p>
+          <small>Turkish cinema, beyond<br />the language barrier.</small>
         </div>
-
-        <!-- Upload Audio Tab -->
-        <div id="uploadTab" class="tab-content active">
-          <div class="upload-info">
-            <p><strong>Step 1:</strong> Download audio locally using yt-dlp:</p>
-            <code>yt-dlp -x --audio-format mp3 "YOUTUBE_URL"</code>
-            <p><strong>Step 2:</strong> Drag & drop the MP3 file below or click to select:</p>
-          </div>
-
-          <div id="dropZone" class="drop-zone">
-            <div class="drop-zone-content">
-              <span class="drop-icon">📁</span>
-              <p>Drag & drop audio file here</p>
-              <p class="drop-hint">or click to select</p>
-              <input type="file" id="audioFileInput" accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac" hidden>
+        <button id="logoutBtn" class="logout-button">
+          Sign out <span aria-hidden="true">↗</span>
+        </button>
+      </aside>
+      <main id="main" class="workspace" tabindex="-1">
+        <header class="topbar">
+          <span>INDEPENDENT CINEMA / SHARED MEMORY</span
+          ><span class="session-badge"><i aria-hidden="true"></i> Private workspace</span>
+        </header>
+        <div id="connectionStatus" role="status" aria-live="polite"></div>
+        <div id="notice" class="notice hidden" role="status" aria-live="polite"></div>
+        <section data-screen="studio" aria-labelledby="studio-title">
+          <div class="hero">
+            <div>
+              <p class="eyebrow">PRESERVE THE VOICE. OPEN THE STORY.</p>
+              <h1 id="studio-title">A second life<br />for <em>the classics.</em></h1>
+              <p class="hero-description">
+                Recover the dialogue. Share the story.<br />Make a film's next audience a little
+                bigger.
+              </p>
             </div>
-            <div id="uploadProgress" class="upload-progress hidden">
-              <div class="progress-bar">
-                <div id="uploadProgressFill" class="progress-fill"></div>
+            <div class="film-art" aria-hidden="true">
+              <div class="film-frame">
+                <span>YEŞİLÇAM</span><strong>Bir film.<br />Bin hikâye.</strong
+                ><small>RESTORED FOR EVERYONE</small>
               </div>
-              <span id="uploadProgressText">Uploading...</span>
+              <span class="film-caption">SOUND → SPEECH → SUBTITLES</span>
             </div>
           </div>
-
-          <div class="form-group">
-            <label for="uploadTitle">Movie Title *</label>
-            <input
-              type="text"
-              id="uploadTitle"
-              placeholder="Film adı"
-              required
-            >
-          </div>
-        </div>
-
-        <!-- YouTube URL Tab -->
-        <div id="youtubeTab" class="tab-content">
-          <div class="upload-info warning">
-            <p><strong>Note:</strong> YouTube downloads may fail from VPS due to IP blocking.
-            Use the "Upload Audio" tab for more reliable processing.</p>
-          </div>
-
-          <form id="submitForm">
-            <div class="form-group">
-              <label for="youtubeUrl">YouTube URL *</label>
-              <input
-                type="text"
-                id="youtubeUrl"
-                name="youtubeUrl"
-                placeholder="https://youtube.com/watch?v=..."
-                required
+          <div class="studio-grid">
+            <section class="panel source-panel" aria-labelledby="source-title">
+              <div class="panel-heading">
+                <span class="step-number">01</span>
+                <div>
+                  <h2 id="source-title">Choose your film</h2>
+                  <p>Start with a file or a YouTube link.</p>
+                </div>
+              </div>
+              <div class="tabs" role="tablist" aria-label="Audio source">
+                <button
+                  id="uploadSource"
+                  class="tab-btn active"
+                  data-tab="upload"
+                  role="tab"
+                  aria-selected="true"
+                  aria-controls="uploadTab"
+                >
+                  Upload a file</button
+                ><button
+                  id="youtubeSource"
+                  class="tab-btn"
+                  data-tab="youtube"
+                  role="tab"
+                  aria-selected="false"
+                  aria-controls="youtubeTab"
+                >
+                  YouTube link
+                </button>
+              </div>
+              <div
+                id="uploadTab"
+                class="tab-content active"
+                role="tabpanel"
+                aria-labelledby="uploadSource"
               >
-            </div>
-
-            <div class="form-group">
-              <label for="imdbId">IMDB ID (optional)</label>
-              <input
-                type="text"
-                id="imdbId"
-                name="imdbId"
-                placeholder="tt1234567"
+                <label for="uploadTitle">Film title</label
+                ><input
+                  id="uploadTitle"
+                  maxlength="200"
+                  placeholder="e.g. Selvi Boylum Al Yazmalım"
+                  autocomplete="off"
+                />
+                <div
+                  id="dropZone"
+                  class="drop-zone"
+                  role="button"
+                  tabindex="0"
+                  aria-label="Choose an audio or video file"
+                >
+                  <span class="upload-symbol" aria-hidden="true">↑</span
+                  ><strong>Drop your film's audio here</strong
+                  ><span>or click to browse · audio and video accepted</span>
+                  <input
+                    type="file"
+                    id="audioFileInput"
+                    accept="audio/*,video/*,.mkv,.flac,.wav,.mp3,.m4a"
+                    hidden
+                  />
+                  <div id="uploadProgress" class="upload-progress hidden">
+                    <div class="progress-bar">
+                      <div id="uploadProgressFill" class="progress-fill"></div>
+                    </div>
+                    <span id="uploadProgressText" role="status">Uploading…</span>
+                  </div>
+                </div>
+                <p class="field-note">
+                  Uploading starts processing with the settings alongside. Keep this tab open until
+                  the upload finishes.
+                </p>
+              </div>
+              <div
+                id="youtubeTab"
+                class="tab-content"
+                role="tabpanel"
+                aria-labelledby="youtubeSource"
+                hidden
               >
-            </div>
-
-            <div class="form-group">
-              <label for="title">Movie Title (optional)</label>
-              <input
-                type="text"
-                id="title"
-                name="title"
-                placeholder="Film adı"
+                <form id="submitForm">
+                  <label for="youtubeUrl">YouTube video URL</label
+                  ><input
+                    type="url"
+                    id="youtubeUrl"
+                    required
+                    placeholder="https://www.youtube.com/watch?v=…"
+                  />
+                  <label for="title">Film title</label
+                  ><input id="title" maxlength="200" placeholder="Give this restoration a name" />
+                  <label for="imdbId">IMDb ID <span class="optional">optional</span></label
+                  ><input id="imdbId" placeholder="tt1234567" pattern="(tt)?[0-9]{5,12}" />
+                  <button type="submit" class="btn-primary full-width">
+                    Begin restoration <span aria-hidden="true">↗</span>
+                  </button>
+                  <p class="field-note">
+                    Existing target-language subtitles are checked first. If YouTube requests
+                    sign-in, add cookies in Connections.
+                  </p>
+                </form>
+              </div>
+            </section>
+            <section class="panel settings-panel" aria-labelledby="settings-title">
+              <div class="panel-heading">
+                <span class="step-number">02</span>
+                <div>
+                  <h2 id="settings-title">Shape the process</h2>
+                  <p>Your source stays on its original timeline.</p>
+                </div>
+              </div>
+              <div class="field-pair">
+                <div>
+                  <label for="sourceLanguage">Spoken language</label
+                  ><input id="sourceLanguage" value="tr" maxlength="4" placeholder="tr or auto" />
+                </div>
+                <div>
+                  <label for="targetLanguage">Subtitle language</label
+                  ><input id="targetLanguage" value="en" maxlength="3" placeholder="en" />
+                </div>
+              </div>
+              <label for="transcriptionProvider">Transcription provider</label
+              ><select id="transcriptionProvider">
+                <option>Loading connections…</option>
+              </select>
+              <label for="transcriptionModel">Model</label
+              ><input
+                id="transcriptionModel"
+                list="transcriptionModels"
+                autocomplete="off"
+              /><datalist id="transcriptionModels"></datalist>
+              <label for="transcriptionMode">Transcription requests</label>
+              <select id="transcriptionMode">
+                <option value="auto">Automatic — full movie with direct ElevenLabs</option>
+                <option value="movie">Full movie — direct ElevenLabs Scribe v2</option>
+                <option value="chunks">Short chunks — local checks and other providers</option>
+              </select>
+              <label class="check-row"
+                ><input id="diarization" type="checkbox" checked /><span>
+                  Identify speakers<small
+                    >Scribe returns anonymous speaker labels for subtitle turns and translation
+                    context.</small
+                  >
+                </span></label
               >
-            </div>
-
-            <button type="submit" class="btn-submit">Start Processing</button>
-          </form>
-        </div>
-      </section>
-
-      <!-- Scanner Status -->
-      <section class="scanner-section">
-        <div class="section-header">
-          <h2>📂 Movies Scanner</h2>
-          <div class="scanner-header-actions">
-            <button id="scanNowBtn" class="btn-small btn-action">Scan Now</button>
-            <span id="scannerStatus" class="scanner-badge">Loading...</span>
+              <p id="transcriptionModeDetails" class="field-note"></p>
+              <div id="cloudControls">
+                <div class="field-pair">
+                  <div>
+                    <label for="maxEstimatedCost">Estimated usage allowance</label
+                    ><input id="maxEstimatedCost" type="number" value="5" min="0.0001" step="any" />
+                  </div>
+                  <div>
+                    <label for="pricePerMinute">Custom price / minute</label
+                    ><input
+                      id="pricePerMinute"
+                      type="number"
+                      min="0"
+                      step="any"
+                      placeholder="Catalog rate"
+                    />
+                  </div>
+                </div>
+                <label for="priceCurrency">Custom rate currency</label
+                ><input id="priceCurrency" value="USD" maxlength="3" />
+                <p class="field-note">
+                  Allowance uses the model's currency. It limits estimated usage, not the provider's
+                  final bill.
+                </p>
+              </div>
+              <p id="providerDetails" class="provider-note">Loading provider details…</p>
+              <div class="subtitle-style-note">
+                <strong>Netflix-inspired subtitles</strong>
+                <p class="field-note">
+                  Two lines, up to 42 characters per line, with reading-speed checks. Every export
+                  includes SRT plus styled ASS: white text, a dark outline, centered at the bottom.
+                  Timing issues are flagged for your review.
+                </p>
+              </div>
+              <label class="check-row"
+                ><input id="translateWithCodex" type="checkbox" /><span>
+                  Translate with local Codex after transcription<small>
+                    Sends the complete subtitles through your ChatGPT subscription. Timing stays
+                    unchanged.
+                  </small></span
+                ></label
+              >
+              <details class="advanced" open>
+                <summary>Audio review &amp; timing</summary>
+                <label class="check-row"
+                  ><input id="keepIntermediates" type="checkbox" /><span>
+                    Keep temporary audio after success<small
+                      >Enable for audio comparisons. Otherwise, completed jobs free their temporary
+                      media; subtitles and request receipts stay saved.</small
+                    >
+                  </span></label
+                >
+                <label class="check-row"
+                  ><input id="pauseBeforeTranscription" type="checkbox" /><span>
+                    Pause before transcription<small
+                      >Review the prepared audio before paid transcription.</small
+                    >
+                  </span></label
+                >
+                <label for="alignmentMethod">Speech boundaries</label
+                ><select id="alignmentMethod">
+                  <option value="native">Provider word timestamps</option>
+                  <option value="silero">Silero speech detection + alignment</option>
+                  <option value="energy">Energy alignment (lighter)</option>
+                </select>
+                <p class="field-note">
+                  Full-movie Scribe uses native word timing without local neural processing. Choose
+                  chunked mode to run local speech detection or energy alignment.
+                </p>
+              </details>
+            </section>
           </div>
-        </div>
-
-        <div id="scannerInfo" class="scanner-info">
-          <div class="scanner-stats">
-            <div class="stat-item">
-              <span class="stat-value" id="statTotalFiles">-</span>
-              <span class="stat-label">Total Files</span>
+          <section class="panel jobs-section" aria-labelledby="jobs-title">
+            <div class="section-header">
+              <div>
+                <p class="eyebrow">WORK IN PROGRESS</p>
+                <h2 id="jobs-title">The cutting room</h2>
+              </div>
+              <div class="header-actions">
+                <button id="queueControlBtn" class="btn-small">Pause queue</button>
+                <button id="clearQueueBtn" class="btn-small btn-warning">Clear waiting jobs</button
+                ><button id="refreshBtn" class="btn-small">Refresh</button>
+              </div>
             </div>
-            <div class="stat-item">
-              <span class="stat-value" id="statProcessed">-</span>
-              <span class="stat-label">Processed</span>
+            <p id="queueControlStatus" class="provider-note" role="status"></p>
+            <p id="storageStatus" class="field-note"></p>
+            <div id="jobsList" class="jobs-list">
+              <p class="empty-state">Your first restoration starts above.</p>
             </div>
-            <div class="stat-item">
-              <span class="stat-value" id="statPending">-</span>
-              <span class="stat-label">Pending</span>
+            <div class="header-actions">
+              <button id="newerJobsBtn" class="btn-small" disabled>Newer</button>
+              <span id="jobPageStatus" class="field-note"></span>
+              <button id="olderJobsBtn" class="btn-small" disabled>Older</button>
             </div>
-            <div class="stat-item">
-              <span class="stat-value" id="statQueued">-</span>
-              <span class="stat-label">In Queue</span>
+          </section>
+          <details class="panel paused-section">
+            <summary>Paused restorations</summary>
+            <div class="section-header">
+              <p>Review the prepared audio, then continue to transcription.</p>
+              <button id="refreshPausedBtn" class="btn-small">Refresh</button>
             </div>
-            <div class="stat-item stat-found">
-              <span class="stat-value" id="statFound">-</span>
-              <span class="stat-label">Found Subs</span>
+            <div id="pausedJobsList"></div>
+          </details>
+        </section>
+        <section data-screen="library" aria-labelledby="library-title" hidden>
+          <div class="page-intro">
+            <p class="eyebrow">THE COLLECTION</p>
+            <h1 id="library-title">Every film<br /><em>has a place.</em></h1>
+            <p>
+              Add files to the persistent movies folder. The scanner waits for each file to finish
+              copying before queuing it.
+            </p>
+          </div>
+          <section class="panel scanner-section">
+            <div class="section-header">
+              <h2>Film library</h2>
+              <div class="header-actions">
+                <span id="scannerStatus" class="scanner-badge">Loading…</span
+                ><button id="scannerControlBtn" class="btn-small">Enable watching</button>
+                <button id="scanNowBtn" class="btn-small">Scan now</button>
+              </div>
             </div>
-          </div>
-
-          <div id="currentJob" class="current-job hidden">
-            <strong>Currently Processing:</strong> <span id="currentJobTitle">-</span>
-          </div>
-
-          <div id="queueList" class="queue-list hidden">
-            <strong>Queue:</strong> <span id="queueTitles">-</span>
-          </div>
-        </div>
-
-        <!-- Found Subtitles Section -->
-        <div class="found-section">
-          <div class="section-header-small">
-            <h3>📥 Downloaded Subtitles</h3>
-            <button id="toggleFound" class="btn-small">Show</button>
-          </div>
-          <div id="foundList" class="found-list hidden"></div>
-        </div>
-
-        <!-- Skipped Files Log -->
-        <div class="skipped-section">
-          <div class="section-header-small">
-            <h3>Recently Skipped Files</h3>
-            <div class="section-actions">
-              <button id="resetAllBtn" class="btn-small btn-warning" title="Reset all processed files">Reset All</button>
-              <button id="toggleSkipped" class="btn-small">Show</button>
+            <p class="field-note">
+              Library scans use the server's default provider, language, translation and retention
+              settings. Watching starts disabled on a fresh deployment. Files wait for queue
+              capacity.
+            </p>
+            <div class="scanner-stats">
+              <div><strong id="statTotalFiles">—</strong><span>Films</span></div>
+              <div><strong id="statProcessed">—</strong><span>Processed</span></div>
+              <div><strong id="statPending">—</strong><span>Settling</span></div>
+              <div><strong id="statQueued">—</strong><span>Queued</span></div>
+              <div><strong id="statFound">—</strong><span>Subtitles found</span></div>
             </div>
+            <div id="currentJob" class="current-job hidden">
+              <span class="eyebrow">ON THE REEL</span>
+              <p id="currentJobTitle"></p>
+            </div>
+            <div id="queueList" class="hidden">
+              <strong>Up next:</strong> <span id="queueTitles"></span>
+            </div>
+            <div class="library-row">
+              <div class="section-header">
+                <h3>Discovered subtitles</h3>
+                <button id="toggleFound" class="btn-small">Show</button>
+              </div>
+              <div id="foundList" class="hidden"></div>
+            </div>
+            <div class="library-row">
+              <div class="section-header">
+                <h3>Scanner notes</h3>
+                <div class="header-actions">
+                  <button id="resetAllBtn" class="btn-small btn-warning">Reset tracking</button
+                  ><button id="toggleSkipped" class="btn-small">Show</button>
+                </div>
+              </div>
+              <div id="skippedList" class="hidden"></div>
+            </div>
+          </section>
+        </section>
+        <section data-screen="translations" aria-labelledby="translations-title" hidden>
+          <div class="page-intro">
+            <p class="eyebrow">BEYOND THE LANGUAGE BARRIER</p>
+            <h1 id="translations-title">Same story.<br /><em>More voices.</em></h1>
+            <p>
+              Give Codex the whole film. Keep the voices, the jokes, and every original timestamp.
+            </p>
           </div>
-          <div id="skippedList" class="skipped-list hidden"></div>
-        </div>
-      </section>
-
-      <!-- Jobs List -->
-      <section class="jobs-section">
-        <div class="section-header">
-          <h2>Processing Queue</h2>
-          <div class="header-actions">
-            <button id="clearQueueBtn" class="btn-small btn-warning">Clear Queue</button>
-            <button id="refreshBtn" class="btn-refresh">Refresh</button>
+          <section class="panel merge-section">
+            <div class="section-header">
+              <h2>Translation desk</h2>
+              <button id="refreshTranslationsBtn" class="btn-small">Refresh</button>
+            </div>
+            <p id="codexStatus" class="provider-note" role="status">Checking local Codex…</p>
+            <p class="field-note">
+              Uses the ChatGPT account signed into Codex on this computer. Translation runs in the
+              cloud and shares your Codex allowance.
+            </p>
+            <form id="codexTranslationForm">
+              <label for="translationSource">Complete subtitles from your library</label>
+              <p class="field-note">
+                Netflix-inspired layout is applied to translations too. Cue IDs and timestamps stay
+                unchanged; styled ASS and readability reports are included.
+              </p>
+              <select id="translationSource">
+                <option value="">Choose an SRT or upload one below</option>
+              </select>
+              <label for="translationUpload">Or upload a complete subtitle file</label>
+              <input id="translationUpload" type="file" accept=".srt,.txt" />
+              <p class="field-note">
+                SRT or SRT-formatted TXT, up to 1 MB. UTF-8 and Turkish Windows-1254 are supported.
+              </p>
+              <label for="translationTitle">Film title</label>
+              <input id="translationTitle" maxlength="200" required />
+              <div class="field-pair">
+                <div>
+                  <label for="translationSourceLanguage">Source language</label
+                  ><input id="translationSourceLanguage" value="tr" maxlength="4" required />
+                </div>
+                <div>
+                  <label for="translationTargetLanguage">Translate into</label
+                  ><input id="translationTargetLanguage" value="en" maxlength="3" required />
+                </div>
+              </div>
+              <label for="codexModel">Codex model (optional)</label>
+              <input
+                id="codexModel"
+                placeholder="Use the installed Codex default"
+                maxlength="100"
+                autocomplete="off"
+              />
+              <p class="field-note">
+                One full-film task. The app checks every cue and timestamp before publishing the
+                translated SRT.
+              </p>
+              <button id="startCodexTranslation" type="submit" class="btn-primary" disabled>
+                Translate with local Codex
+              </button>
+            </form>
+          </section>
+          <section class="panel jobs-section">
+            <h2>Subtitle translations</h2>
+            <div id="translationJobs" class="jobs-list"></div>
+          </section>
+          <details id="legacyTranslations" class="panel" hidden>
+            <summary>Previous chunk exports</summary>
+            <div id="translationsList" class="translations-list"></div>
+          </details>
+        </section>
+        <section data-screen="connections" aria-labelledby="connections-title" hidden>
+          <div class="page-intro">
+            <p class="eyebrow">YOUR TOOLS, CONNECTED</p>
+            <h1 id="connections-title">Keys to<br /><em>the studio.</em></h1>
+            <p>Save a key once. Use it for the next request. No restart, no rebuild.</p>
           </div>
-        </div>
-
-        <div id="jobsList" class="jobs-list">
-          <p class="empty-state">No jobs yet. Submit a video to get started!</p>
-        </div>
-      </section>
-
-      <!-- Paused Jobs Section -->
-      <section class="paused-section">
-        <div class="section-header">
-          <h2>⏸️ Paused Jobs</h2>
-          <button id="refreshPausedBtn" class="btn-refresh">Refresh</button>
-        </div>
-        <p class="section-desc">Jobs paused after audio processing. Resume to continue with transcription.</p>
-
-        <div id="pausedJobsList" class="paused-list">
-          <p class="empty-state">No paused jobs. Enable PAUSE_AFTER_DEMUCS in config to use this feature.</p>
-        </div>
-      </section>
-
-      <!-- Translation Merge Section -->
-      <section class="merge-section">
-        <div class="section-header">
-          <h2>Merge Translations</h2>
-          <button id="refreshTranslationsBtn" class="btn-refresh">Refresh</button>
-        </div>
-        <p class="section-desc">After translating the JSON chunks, merge them back into an SRT file.</p>
-
-        <div id="translationsList" class="translations-list">
-          <p class="empty-state">No translation chunks found. Process a video first!</p>
-        </div>
-      </section>
+          <div class="connection-explainer">
+            <strong>Stored privately on your server</strong>
+            <p>
+              Secret values are encrypted and never sent back to this page. A saved key has not been
+              tested against its provider. Blank fields keep the existing value; Clear removes it.
+            </p>
+          </div>
+          <div id="connectionsList" class="connections-grid" aria-live="polite"></div>
+          <section class="panel account-panel">
+            <h2>Workspace password</h2>
+            <p>Changing it signs out every browser session.</p>
+            <form id="passwordForm">
+              <div class="field-pair">
+                <div>
+                  <label for="currentPassword">Current password</label
+                  ><input
+                    id="currentPassword"
+                    type="password"
+                    autocomplete="current-password"
+                    required
+                  />
+                </div>
+                <div>
+                  <label for="newPassword">New password</label
+                  ><input
+                    id="newPassword"
+                    type="password"
+                    autocomplete="new-password"
+                    minlength="12"
+                    required
+                  />
+                </div>
+              </div>
+              <button class="btn-primary" type="submit">Change password</button>
+              <p id="passwordStatus" role="status"></p>
+            </form>
+          </section>
+        </section>
+        <footer class="workspace-footer">
+          <span>YEŞİLÇAM REVIVAL</span><span>Made for the love of cinema.</span>
+        </footer>
+      </main>
     </div>
-
-    <!-- Job Detail Modal -->
-    <div id="jobModal" class="modal hidden">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3 id="modalTitle">Job Details</h3>
-          <button class="modal-close" onclick="closeModal()">&times;</button>
-        </div>
-        <div class="modal-body">
-          <div id="jobDetails"></div>
-          <div class="logs-section">
-            <h4>Processing Logs</h4>
-            <div id="jobLogs" class="logs-container"></div>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button onclick="closeModal()" class="btn-secondary">Close</button>
-          <button id="deleteJobBtn" class="btn-danger">Delete Job</button>
+    <dialog id="jobModal" class="modal">
+      <div class="modal-header">
+        <h2 id="modalTitle">Restoration details</h2>
+        <button class="modal-close" data-close-modal aria-label="Close details">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="jobDetails"></div>
+        <div class="logs-section">
+          <h3>Processing journal</h3>
+          <div id="jobLogs" class="logs-container"></div>
         </div>
       </div>
-    </div>
-  </div>
-
-  <script src="app-config.js"></script>
-  <script src="app.js"></script>
-</body>
+      <div class="modal-footer">
+        <button data-close-modal class="btn-secondary">Close</button
+        ><button id="deleteJobBtn" class="btn-danger">Delete history</button>
+      </div>
+    </dialog>
+    <script src="app-config.js"></script>
+    <script type="module" src="app.js"></script>
+  </body>
 </html>

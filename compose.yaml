@@ -1,0 +1,34 @@
+# Optional Compose deployment. For Coolify's Dockerfile build pack, see DEPLOYMENT.md.
+services:
+  studio:
+    build:
+      context: .
+      args:
+        INSTALL_LOCAL_WHISPER: 'false'
+        INSTALL_LOCAL_AUDIO: 'false'
+    restart: unless-stopped
+    stop_grace_period: 30s
+    cpus: 2.0
+    mem_limit: 4g
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    environment:
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set the public HTTPS origin}
+      APP_PASSWORD: ${APP_PASSWORD:?Set a first-start password of at least 12 characters}
+      KEEP_INTERMEDIATES: ${KEEP_INTERMEDIATES:-false}
+      TRANSLATION_ENABLED: ${TRANSLATION_ENABLED:-false}
+    volumes:
+      - studio-data:/data
+    expose:
+      - '3000'
+    # Connect your reverse proxy to this service; no public host port is exposed.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+volumes:
+  studio-data:

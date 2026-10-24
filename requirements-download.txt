@@ -1,0 +1,2 @@
+# Bundles the matching EJS solver; Node is provided by the image.
+yt-dlp[default]==2026.10.21

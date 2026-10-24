@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "rootDir": "public",
+    "outDir": "build/public",
+    "strict": true,
+    "useUnknownInCatchVariables": false,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": []
+  },
+  "include": ["public/**/*.ts"]
+}

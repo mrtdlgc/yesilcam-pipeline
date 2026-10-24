@@ -1,0 +1,8 @@
+build/
+node_modules/
+data/
+temp/
+movies/
+output/
+found/
+package-lock.json

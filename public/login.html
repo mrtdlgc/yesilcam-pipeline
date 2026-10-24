@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#192b25" />
+    <title>Enter the studio · Yeşilçam Revival</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="login-page">
+    <main class="login-layout">
+      <section class="login-story">
+        <a class="brand" href="./"
+          ><span class="brand-mark">Y<span>R</span></span
+          ><span>YEŞİLÇAM<small>REVIVAL</small></span></a
+        >
+        <div>
+          <p class="eyebrow">CINEMA DOESN'T GET OLD.</p>
+          <h1>
+            Some stories<br />deserve <em>another<br />audience.</em>
+          </h1>
+          <p>A small studio for a lasting part of Turkish cinema.</p>
+        </div>
+        <span class="login-footnote">PRESERVE THE VOICE. OPEN THE STORY.</span>
+      </section>
+      <section class="login-form-panel">
+        <span class="eyebrow">PRIVATE RESTORATION WORKSPACE</span>
+        <h2>Enter the studio.</h2>
+        <p>Your films, connections, and unfinished stories are waiting.</p>
+        <form id="loginForm">
+          <label for="password">Workspace password</label
+          ><input
+            id="password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            required
+            autofocus
+          /><button class="btn-primary full-width" type="submit">
+            Sign in <span aria-hidden="true">↗</span>
+          </button>
+          <p id="loginError" class="error-message" role="alert"></p>
+        </form>
+        <small>Sessions last 12 hours. Credentials stay on the server.</small>
+      </section>
+    </main>
+    <script src="app-config.js"></script>
+    <script type="module" src="login.js"></script>
+  </body>
+</html>

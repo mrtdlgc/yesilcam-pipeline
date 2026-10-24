@@ -1,0 +1,11 @@
+{
+  "providers": [
+    { "provider": "groq", "model": "whisper-large-v3" },
+    { "provider": "mistral", "model": "voxtral-mini-transcribe-3-0" },
+    { "provider": "openai", "model": "gpt-transcribe" },
+    { "provider": "elevenlabs", "model": "scribe_v2" },
+    { "provider": "xai", "model": "grok-voice-transcribe-2.0" },
+    { "provider": "gemini", "model": "gemini-3.5-transcribe" },
+    { "provider": "openrouter", "model": "mistralai/voxtral-small-transcribe-3-0" }
+  ]
+}

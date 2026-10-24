@@ -1,0 +1,258 @@
+{
+  "checkedAt": "2026-10-23",
+  "source": "https://openrouter.ai/api/v1/models?output_modalities=transcription",
+  "models": [
+    {
+      "id": "mistralai/voxtral-small-transcribe-3-0",
+      "name": "Mistral: Voxtral Small Transcribe 3",
+      "description": "Voxtral Small Transcribe 3 is Mistral's flagship speech-to-text model. It takes audio input and returns a transcript with timestamps and speaker diarization, and supports context biasing for domain-specific vocabulary. Suited...",
+      "rawPricing": {
+        "prompt": "0.0000666667",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "mistralai/voxtral-mini-transcribe-3-0",
+      "name": "Mistral: Voxtral Mini Transcribe 3",
+      "description": "Voxtral Mini Transcribe 3 is Mistral's compact speech-to-text model. It takes audio input and returns a transcript with timestamps and speaker diarization. It also supports context biasing for domain terms....",
+      "rawPricing": {
+        "prompt": "0.0000583333",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "assemblyai/universal-3-6-pro",
+      "name": "AssemblyAI: Universal-3.6 Pro",
+      "description": "Universal-3.6 Pro is AssemblyAI's speech-to-text model and the successor to Universal-3.5 Pro, served here through AssemblyAI's Sync API. Compared with Universal-3.5 Pro, AssemblyAI reports 30% fewer errors on short conversational...",
+      "rawPricing": {
+        "prompt": "0.0000833333",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "elevenlabs/scribe-v2",
+      "name": "ElevenLabs: Scribe v2",
+      "description": "ElevenLabs Scribe v2 is a speech-to-text model that transcribes audio in 90+ languages with word-level timestamps, optional speaker diarization, and audio-event tagging.",
+      "rawPricing": {
+        "prompt": "0.0000611111111111",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "elevenlabs/scribe-v2-medical",
+      "name": "ElevenLabs: Scribe v2 Medical",
+      "description": "ElevenLabs Scribe v2 Medical is a speech-to-text model tuned for clinical and medical terminology, with word-level timestamps, optional speaker diarization, and audio-event tagging.",
+      "rawPricing": {
+        "prompt": "0.0000611111111111",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "google/gemini-3.5-transcribe",
+      "name": "Google: Gemini 3.5 Transcribe",
+      "description": "Gemini 3.5 Transcribe is a speech-to-text model from Google. It is suited for synchronous transcription that needs word-level timestamps or speaker diarization, with support for up to eight speakers. Audio...",
+      "rawPricing": {
+        "prompt": "0.000002",
+        "completion": "0.000012"
+      }
+    },
+    {
+      "id": "fish-audio/transcribe-1-pro",
+      "name": "Fish Audio: Transcribe 1 Pro",
+      "description": "Transcribe 1 Pro is a speech-to-text model from Fish Audio tuned for interviews, meetings, and podcasts. It labels speakers with inline `speaker` markers, preserves emotion and vocal-event cues such as...",
+      "rawPricing": {
+        "prompt": "0.0001",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "assemblyai/universal-3-5-pro",
+      "name": "AssemblyAI: Universal-3.5 Pro",
+      "description": "Universal-3.5 Pro is AssemblyAI's speech-to-text model served through its Sync API, returning a complete transcript with word-level timestamps in a single synchronous response for audio up to 20 minutes. It...",
+      "rawPricing": {
+        "prompt": "0.0000833333",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "meta/muse-voice-transcribe-1.0",
+      "name": "Meta: Muse Voice Transcribe 1.0",
+      "description": "Muse Voice Transcribe 1.0 is a synchronous speech-to-text model from Meta. It is suited for push-to-talk, endpointing, and speaker-aware transcription, with keyword biasing for domain terms and language biasing through...",
+      "rawPricing": {
+        "prompt": "0.00005",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "microsoft/mai-transcribe-2",
+      "name": "Microsoft AI: MAI-Transcribe 2",
+      "description": "MAI-Transcribe 2 is a multilingual speech-to-text model from Microsoft AI, ranked #1 on the FLEURS multilingual benchmark. It supports 60 languages with automatic language identification, code switching for mixed-language speech,...",
+      "rawPricing": {
+        "prompt": "0.1",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "nvidia/nemotron-3.5-asr-streaming-multilingual-0.6b",
+      "name": "NVIDIA: Nemotron 3.5 ASR Streaming Multilingual 0.6B",
+      "description": "Nemotron 3.5 ASR Streaming Multilingual 0.6B is a speech recognition model from NVIDIA. Its prompt-conditioned, cache-aware FastConformer-RNNT design targets low-latency transcription across more than 40 languages for real-time captioning, voice...",
+      "rawPricing": {
+        "prompt": "0.00000333",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "mistralai/voxtral-small-24b-2507-stt",
+      "name": "Mistral: Voxtral Small 24B 2507 STT",
+      "description": "Voxtral Small 24B 2507 STT is a speech transcription model from Mistral AI. It is suited for transcription, translation, and audio understanding workloads that benefit from its larger model capacity.",
+      "rawPricing": {
+        "prompt": "0.00005",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "mistralai/voxtral-mini-3b-2507",
+      "name": "Mistral: Voxtral Mini 3B 2507",
+      "description": "Voxtral Mini 3B 2507 is a speech and audio understanding model from Mistral AI. It is suited for transcription, translation, and compact audio processing workloads.",
+      "rawPricing": {
+        "prompt": "0.0000166667",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "qwen/qwen3-asr-1.7b",
+      "name": "Qwen: Qwen3 ASR 1.7B",
+      "description": "Qwen3 ASR 1.7B is an automatic speech recognition model from Qwen. It supports multilingual language identification and transcription across 30 languages and 22 Chinese dialects, with streaming and offline inference...",
+      "rawPricing": {
+        "prompt": "0.0000075",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "qwen/qwen3-asr-0.6b",
+      "name": "Qwen: Qwen3 ASR 0.6B",
+      "description": "Qwen3 ASR 0.6B is a compact automatic speech recognition model from Qwen. It supports multilingual language identification and transcription across 30 languages and 22 Chinese dialects, with streaming and offline...",
+      "rawPricing": {
+        "prompt": "0.00000333",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "openai/gpt-transcribe",
+      "name": "OpenAI: GPT Transcribe",
+      "description": "GPT Transcribe is a high-accuracy speech-to-text model from OpenAI. It is suited for recorded audio, streamed file transcription, and committed Realtime turns, with free-form context, keyword hints, and multiple language...",
+      "rawPricing": {
+        "prompt": "0.000075",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "fish-audio/transcribe-1",
+      "name": "Fish Audio: Transcribe 1",
+      "description": "Transcribe 1 is a speech-to-text model from Fish Audio. It is suited for audio transcription with automatic language detection and can return timestamped word-level segments when alignment details are requested.",
+      "rawPricing": {
+        "prompt": "0.0001",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "x-ai/grok-stt-1.0",
+      "name": "SpaceXAI: Grok STT 1.0",
+      "description": "Grok STT is SpaceXAI's speech-to-text model, available via the REST /v1/stt endpoint. It supports transcription with word-level timestamps, optional speaker diarization, and multichannel audio.",
+      "rawPricing": {
+        "prompt": "0.0000277777777778",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "deepgram/nova-3",
+      "name": "Deepgram: Nova-3",
+      "description": "Deepgram Nova-3 general-purpose speech-to-text model with monolingual and multilingual transcription support.",
+      "rawPricing": {
+        "prompt": "0.0000716666666667",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "microsoft/mai-transcribe-1.5",
+      "name": "Microsoft AI: MAI-Transcribe 1.5",
+      "description": "MAI-Transcribe 1.5 is a multilingual speech-to-text model from Microsoft AI. It is suited for captions, call transcription, subtitling, accessibility, and other voice-enabled applications, with reliable transcription across 43 languages, diverse...",
+      "rawPricing": {
+        "prompt": "0.36",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "nvidia/parakeet-tdt-0.6b-v3",
+      "name": "NVIDIA: Parakeet TDT 0.6B v3",
+      "description": "Parakeet TDT 0.6B v3 is NVIDIA's 600M-parameter multilingual speech-to-text model built on the FastConformer-TDT architecture. Trained on the Granary dataset (670,000+ hours of audio), it supports automatic language detection across...",
+      "rawPricing": {
+        "prompt": "0.000025",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "mistralai/voxtral-mini-transcribe",
+      "name": "Mistral: Voxtral Mini Transcribe",
+      "description": "Voxtral Mini Transcribe is Mistral's speech-to-text model, derived from the Voxtral Mini family. It accepts audio input and returns transcribed text via the standard transcription API. Suited for transcribing meetings,...",
+      "rawPricing": {
+        "prompt": "0.00005",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "google/chirp-3",
+      "name": "Google: Chirp 3",
+      "description": "Chirp 3 is Google's latest multilingual speech-to-text model. It offers enhanced transcription accuracy across 24 GA languages and 77+ preview languages, with support for automatic language detection, automatic punctuation, and...",
+      "rawPricing": {
+        "prompt": "0.000266666666667",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "openai/gpt-4o-mini-transcribe",
+      "name": "OpenAI: GPT-4o Mini Transcribe",
+      "description": "GPT-4o Mini Transcribe is OpenAI's smaller, cost-efficient speech-to-text model built on GPT-4o Mini audio capabilities. It's priced per token (input and output), making it suitable for high-volume transcription workflows that...",
+      "rawPricing": {
+        "prompt": "0.00000125",
+        "completion": "0.000005"
+      }
+    },
+    {
+      "id": "openai/whisper-large-v3",
+      "name": "OpenAI: Whisper Large V3",
+      "description": "Whisper Large V3 is OpenAI's open-source automatic speech recognition model offering both audio transcription and translation. It supports 99+ languages and accepts common audio formats including mp3, mp4, wav, webm,...",
+      "rawPricing": {
+        "prompt": "0.0000075",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "openai/whisper-large-v3-turbo",
+      "name": "OpenAI: Whisper Large V3 Turbo",
+      "description": "Whisper Large V3 Turbo is an optimized version of OpenAI's Whisper Large V3 speech recognition model, designed for speed and cost efficiency. It supports transcription across 99+ languages with a...",
+      "rawPricing": {
+        "prompt": "0.00000333",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "openai/whisper-1",
+      "name": "OpenAI: Whisper 1",
+      "description": "Whisper is OpenAI's open-source automatic speech recognition model, available via API as `whisper-1`. It supports transcription and translation across 50+ languages from audio files up to 25 MB. Accepts formats...",
+      "rawPricing": {
+        "prompt": "0.0001",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "openai/gpt-4o-transcribe",
+      "name": "OpenAI: GPT-4o Transcribe",
+      "description": "GPT-4o Transcribe is OpenAI's high-quality speech-to-text model built on GPT-4o audio capabilities. It's priced per token (input and output), making it suitable for workflows that benefit from token-level billing transparency.",
+      "rawPricing": {
+        "prompt": "0.0000025",
+        "completion": "0.00001"
+      }
+    }
+  ]
+}

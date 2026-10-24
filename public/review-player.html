@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Subtitle review · Yeşilçam Revival</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./review-player.css" />
+    <script src="./review-player.js" type="module"></script>
+  </head>
+  <body>
+    <header class="masthead">
+      <a href="./" class="brand">YEŞİLÇAM <span>REVIVAL</span></a>
+      <span class="room-label">THE SCREENING ROOM</span>
+      <a href="./" class="quiet-link">Back to studio ↗</a>
+    </header>
+    <main>
+      <div class="intro">
+        <div>
+          <p class="eyebrow">WATCH. LISTEN. REFINE.</p>
+          <h1 id="filmTitle">Subtitle review</h1>
+          <p id="filmDescription" class="muted">Loading the screening…</p>
+        </div>
+        <div class="actions">
+          <a id="alternateReview" class="button secondary" hidden></a>
+          <a id="downloadSrt" class="button secondary" hidden download>Download original SRT</a>
+          <a id="downloadAss" class="button secondary" hidden download>Download ASS</a>
+          <button id="exportNotes" disabled>Export review notes</button>
+        </div>
+      </div>
+      <p id="status" class="status" role="status">Opening the film and subtitles…</p>
+      <div id="draftRecovery" class="recovery" hidden>
+        <p id="draftMessage"></p>
+        <button id="retryEdits" class="secondary">Retry saving</button>
+        <button id="exportDraft" class="secondary">Download unsaved edits</button>
+        <button id="keepDraft" class="secondary" hidden>
+          Keep my edits over the saved version
+        </button>
+        <button id="loadSaved" class="secondary">Load saved version</button>
+      </div>
+      <div id="workspace" class="workspace" hidden>
+        <section class="screening" aria-label="Film and review controls">
+          <div class="screen">
+            <video
+              id="film"
+              controls
+              preload="metadata"
+              playsinline
+              aria-label="Film with subtitles"
+            >
+              <track
+                id="subtitles"
+                kind="subtitles"
+                srclang="tr"
+                label="Turkish · Scribe v2"
+                default
+              />
+            </video>
+          </div>
+          <div class="transport">
+            <button id="playPause" class="play">Play</button>
+            <button id="backFive" class="secondary" aria-label="Back 5 seconds">−5s</button>
+            <button id="forwardFive" class="secondary" aria-label="Forward 5 seconds">+5s</button>
+            <output id="clock" class="clock">00:00 / 00:00</output>
+            <label class="inline"
+              >Speed
+              <select id="speed" aria-label="Playback speed">
+                <option value="0.5">0.5×</option>
+                <option value="0.75">0.75×</option>
+                <option value="1" selected>1×</option>
+                <option value="1.25">1.25×</option>
+                <option value="1.5">1.5×</option>
+              </select></label
+            >
+            <label class="inline"
+              ><input type="checkbox" id="showSubtitles" checked /> Subtitles</label
+            >
+            <label id="languageControl" class="inline" hidden
+              >Track
+              <select id="subtitleLanguage" aria-label="Subtitle language"></select>
+            </label>
+          </div>
+          <div class="tools">
+            <form id="timeForm" class="inline">
+              <label for="jumpTime">Go to time</label>
+              <input
+                id="jumpTime"
+                type="text"
+                placeholder="29:14"
+                inputmode="decimal"
+                aria-describedby="timeHint"
+              />
+              <button type="submit" class="secondary">Go</button>
+              <span id="timeHint" class="sr-only"
+                >Minutes:seconds, optionally hours:minutes:seconds</span
+              >
+            </form>
+            <button id="markCurrent" class="secondary">Note current cue <kbd>N</kbd></button>
+            <label id="localMediaControl" class="inline" hidden
+              >Open matching film
+              <input id="localMedia" type="file" accept="video/*,audio/*" />
+            </label>
+          </div>
+          <section class="inspector" aria-labelledby="selectedTitle">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">SELECTED CUE</p>
+                <h2 id="selectedTitle">Choose a subtitle</h2>
+              </div>
+              <div class="actions compact">
+                <button id="previousCue" class="secondary" aria-label="Previous cue">←</button>
+                <button id="replayCue" class="secondary">Replay cue</button>
+                <button id="nextCue" class="secondary" aria-label="Next cue">→</button>
+              </div>
+            </div>
+            <p id="selectedMeta" class="muted"></p>
+            <blockquote id="selectedText" lang="tr"></blockquote>
+            <div id="correctionEditor" hidden>
+              <div class="text-editors">
+                <label
+                  ><span id="sourceTextLabel">Original language</span>
+                  <textarea id="sourceText" rows="3" spellcheck="false"></textarea>
+                </label>
+                <label id="targetTextControl"
+                  ><span id="targetTextLabel">Translation</span>
+                  <textarea id="targetText" rows="3" spellcheck="true"></textarea>
+                </label>
+              </div>
+              <div class="timing-editors">
+                <label
+                  >Start
+                  <input id="cueStart" type="text" inputmode="decimal" aria-label="Cue start time"
+                /></label>
+                <button id="startHere" class="secondary">Start here</button>
+                <label
+                  >End <input id="cueEnd" type="text" inputmode="decimal" aria-label="Cue end time"
+                /></label>
+                <button id="endHere" class="secondary">End here</button>
+                <button id="earlierCue" class="secondary">−0.1s</button>
+                <button id="laterCue" class="secondary">+0.1s</button>
+              </div>
+              <p class="fine-print">
+                Text edits change that language; adjust the translation alongside corrected
+                dialogue. Timing edits move both tracks together. Changes save automatically.
+              </p>
+              <div class="note-controls">
+                <label class="inline"
+                  ><input id="omitCue" type="checkbox" /> Exclude this cue from exports</label
+                >
+                <button id="restoreCue" class="secondary">Restore generated cue</button>
+              </div>
+              <details class="original-cue">
+                <summary>Generated original</summary>
+                <pre id="originalCue"></pre>
+              </details>
+              <details class="passage-tools">
+                <summary>Shift a passage or the whole film</summary>
+                <div class="timing-editors">
+                  <label>From cue # <input id="shiftFrom" type="text" inputmode="numeric" /></label>
+                  <label
+                    >Through cue # <input id="shiftTo" type="text" inputmode="numeric"
+                  /></label>
+                  <label
+                    >Offset in seconds <input id="shiftSeconds" type="number" step="0.1" value="0"
+                  /></label>
+                  <button id="shiftRemaining" class="secondary">Through end</button>
+                  <button id="shiftAll" class="secondary">Whole film</button>
+                  <button id="applyShift">Apply offset</button>
+                </div>
+                <p class="fine-print">
+                  Positive offsets show subtitles later; negative offsets show them earlier. Only
+                  the selected range changes.
+                </p>
+              </details>
+              <details id="addCuePanel" class="passage-tools">
+                <summary>Add missing dialogue</summary>
+                <div class="timing-editors">
+                  <label>Start <input id="addStart" type="text" inputmode="decimal" /></label>
+                  <label>End <input id="addEnd" type="text" inputmode="decimal" /></label>
+                  <button id="addHere" class="secondary">Use playback time</button>
+                </div>
+                <div class="text-editors">
+                  <label
+                    ><span id="addSourceLabel">Original language</span
+                    ><textarea id="addSource" rows="2"></textarea>
+                  </label>
+                  <label id="addTargetControl"
+                    ><span id="addTargetLabel">Translation</span
+                    ><textarea id="addTarget" rows="2"></textarea>
+                  </label>
+                </div>
+                <button id="addCue">Add subtitle</button>
+              </details>
+              <div id="originalDownloads" class="actions compact"></div>
+            </div>
+            <div id="selectedFlags" class="flags"></div>
+            <div class="note-controls">
+              <label class="inline"><input id="needsFix" type="checkbox" /> Mark for later</label>
+              <label class="inline"><input id="loopCue" type="checkbox" /> Loop selected cue</label>
+            </div>
+            <label for="cueNote" class="note-label">What should change?</label>
+            <textarea
+              id="cueNote"
+              rows="3"
+              placeholder="Wrong word, speaker, timing, missing dialogue…"
+            ></textarea>
+            <p id="saveStatus" class="fine-print">
+              Notes save in this browser. Export them to share or keep a separate copy.
+            </p>
+          </section>
+          <p id="shortcuts" class="fine-print shortcuts">
+            <kbd>Space</kbd> play / pause <kbd>←</kbd><kbd>→</kbd> seek 5s <kbd>[</kbd
+            ><kbd>]</kbd> previous / next cue <kbd>R</kbd> replay <kbd>N</kbd> note current cue
+          </p>
+          <p id="reviewExplanation" class="fine-print">
+            Original SRT text and timing are preserved. Notes do not edit the subtitles. Speaker
+            labels are tentative voice groups, not verified character names.
+          </p>
+        </section>
+        <aside class="transcript" aria-label="Subtitle cue browser">
+          <div class="transcript-header">
+            <div class="section-heading">
+              <h2>Dialogue</h2>
+              <span id="cueCount" class="badge"></span>
+            </div>
+            <label for="search" class="sr-only">Search dialogue or cue number</label>
+            <input type="search" id="search" placeholder="Search dialogue or cue #…" />
+            <div class="filter-row">
+              <label for="filter" class="sr-only">Filter cues</label>
+              <select id="filter">
+                <option value="all">All cues</option>
+                <option value="warnings">Automatic warnings</option>
+                <option value="notes">My notes & flags</option>
+                <option value="changed">Edited cues</option>
+              </select>
+              <label class="inline"
+                ><input id="followPlayback" type="checkbox" checked /> Follow</label
+              >
+            </div>
+            <p id="listSummary" class="fine-print"></p>
+          </div>
+          <div id="cueList" class="cue-list" role="list" aria-label="Subtitle cues"></div>
+        </aside>
+      </div>
+    </main>
+  </body>
+</html>

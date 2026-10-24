@@ -1,0 +1,4 @@
+# CTranslate2 and its CUDA 12 libraries are isolated from Demucs/PyTorch CUDA 13.
+faster-whisper==1.2.1
+ctranslate2==4.8.3
+numpy==2.2.6

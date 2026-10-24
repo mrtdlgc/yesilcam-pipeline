@@ -1,0 +1,4 @@
+-r requirements-whisper.txt
+# Linux wheels, installed only into the Whisper environment.
+nvidia-cublas-cu12==12.9.2.10
+nvidia-cudnn-cu12==9.27.0.42

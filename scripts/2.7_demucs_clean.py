@@ -1,355 +1,111 @@
 #!/usr/bin/env python3
-"""
-Demucs Audio Cleaning
-Uses Demucs model to extract vocals track and remove background music/noise.
-This improves Whisper transcription accuracy for films with heavy soundtracks.
-
-Supported models:
-- htdemucs: Default hybrid model
-- htdemucs_ft: Fine-tuned, better quality but slower
-- htdemucs_6s: 6-source separation
-- mdx_extra: Alternative architecture
-
-Usage:
-    python 2.7_demucs_clean.py <audio_file> --output <output_dir>
-    python 2.7_demucs_clean.py --batch <chunks_json> --output <output_dir>
-    python 2.7_demucs_clean.py --check  # Check if demucs is available
-"""
-
+"""Separate chunks sequentially with one model; retain floating point vocals."""
 import argparse
+import hashlib
 import json
 import os
-import shutil
+from pathlib import Path
 import subprocess
 import sys
-import tempfile
-from pathlib import Path
-
-# Use the same Python interpreter that's running this script
-PYTHON_CMD = sys.executable
 
 
-def check_dependencies():
-    """Check if Demucs is installed and available."""
-    result = {
-        'installed': False,
-        'version': None,
-        'cuda_available': False,
-        'errors': []
-    }
-
-    try:
-        # Check if demucs is importable
-        import demucs
-        result['installed'] = True
-        result['version'] = getattr(demucs, '__version__', 'unknown')
-    except ImportError as e:
-        result['errors'].append(f'demucs not installed: {e}')
-        return result
-
-    # Check CUDA availability
-    try:
-        import torch
-        result['cuda_available'] = torch.cuda.is_available()
-        if result['cuda_available']:
-            result['cuda_device'] = torch.cuda.get_device_name(0)
-    except:
-        pass
-
-    # Verify demucs CLI is available
-    try:
-        proc = subprocess.run(
-            [PYTHON_CMD, '-m', 'demucs', '--help'],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        if proc.returncode != 0:
-            result['errors'].append('demucs CLI not working')
-    except Exception as e:
-        result['errors'].append(f'demucs CLI error: {e}')
-
-    return result
-
-
-def save_audio_scipy(tensor, path, samplerate):
-    """Save audio tensor using scipy instead of torchaudio (avoids torchcodec issues)."""
-    import numpy as np
-    from scipy.io import wavfile
-
-    # Convert tensor to numpy
-    audio = tensor.cpu().numpy()
-
-    # Handle stereo/mono
-    if audio.ndim == 2:
-        audio = audio.T  # scipy expects (samples, channels)
-
-    # Convert to int16
-    audio = np.clip(audio, -1.0, 1.0)
-    audio = (audio * 32767).astype(np.int16)
-
-    wavfile.write(path, samplerate, audio)
-
-
-def separate_vocals(
-    audio_file,
-    output_dir,
-    model_name='htdemucs_ft',
-    device='cpu',
-    shifts=1
-):
-    """
-    Extract vocals from audio file using Demucs API directly.
-    Saves output with scipy to avoid torchaudio/torchcodec issues.
-
-    Args:
-        audio_file: Input audio path
-        output_dir: Directory to save output
-        model_name: Demucs model name
-        device: 'cpu' or 'cuda'
-        shifts: Number of shifts for better quality (1-5)
-
-    Returns: Path to extracted vocals file
-    """
-    import torch
-
-    audio_path = Path(audio_file)
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    print(f"  Separating vocals from: {audio_path.name}", file=sys.stderr)
-
-    try:
-        # Import demucs components
-        from demucs.pretrained import get_model
-        from demucs.apply import apply_model
-
-        # Load audio with ffmpeg (avoid torchaudio)
-        import numpy as np
-        from scipy.io import wavfile
-
-        # Convert to wav first with ffmpeg
-        temp_wav = output_path / f"_temp_{audio_path.stem}.wav"
-        subprocess.run([
-            'ffmpeg', '-i', str(audio_path),
-            '-ar', '44100', '-ac', '2',
-            '-f', 'wav', '-y', str(temp_wav)
-        ], capture_output=True, check=True)
-
-        # Read with scipy
-        sr, audio = wavfile.read(str(temp_wav))
-        os.unlink(str(temp_wav))
-
-        # Convert to float tensor
-        if audio.dtype == np.int16:
-            audio = audio.astype(np.float32) / 32768.0
-        elif audio.dtype == np.int32:
-            audio = audio.astype(np.float32) / 2147483648.0
-
-        # Shape: (channels, samples)
-        if audio.ndim == 1:
-            audio = np.stack([audio, audio])  # Mono to stereo
-        else:
-            audio = audio.T
-
-        wav = torch.from_numpy(audio).float()
-
-        # Load model
-        model = get_model(model_name)
-        model.to(device)
-        model.eval()
-
-        # Add batch dimension
-        wav = wav.unsqueeze(0).to(device)
-
-        # Apply model
-        with torch.no_grad():
-            sources = apply_model(model, wav, shifts=shifts, overlap=0.25)
-
-        # Get vocals (find index in sources)
-        vocals_idx = model.sources.index('vocals')
-        vocals = sources[0, vocals_idx]  # Remove batch dim
-
-        # Save with scipy
-        final_path = output_path / f"{audio_path.stem}_vocals.wav"
-        save_audio_scipy(vocals, str(final_path), model.samplerate)
-
-        print(f"  ✓ Vocals extracted: {final_path.name}", file=sys.stderr)
-        return str(final_path)
-
-    except Exception as e:
-        print(f"  Warning: Demucs error: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc(file=sys.stderr)
-        return None
-
-
-def process_chunks(chunks, output_dir, model='htdemucs_ft', device='cpu', shifts=1):
-    """
-    Process multiple audio chunks through Demucs.
-
-    Args:
-        chunks: List of chunk dicts with 'file' key
-        output_dir: Directory for cleaned outputs
-        model: Demucs model name
-        device: 'cpu' or 'cuda'
-        shifts: Number of shifts for quality
-
-    Returns: {
-        'chunks': Updated chunk list with cleaned file paths,
-        'stats': Processing statistics
-    }
-    """
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    processed_chunks = []
-    stats = {
-        'total': len(chunks),
-        'success': 0,
-        'failed': 0,
-        'skipped': 0
-    }
-
-    print(f"Processing {len(chunks)} chunks with Demucs ({model})...", file=sys.stderr)
-
-    for i, chunk in enumerate(chunks):
-        audio_file = chunk.get('file')
-
-        if not audio_file or not os.path.exists(audio_file):
-            print(f"  [{i+1}/{len(chunks)}] Skipped: file not found", file=sys.stderr)
-            processed_chunks.append(chunk)
-            stats['skipped'] += 1
-            continue
-
-        print(f"  [{i+1}/{len(chunks)}] Processing: {os.path.basename(audio_file)}", file=sys.stderr)
-
-        vocals_file = separate_vocals(
-            audio_file,
-            output_dir,
-            model_name=model,
-            device=device,
-            shifts=shifts
-        )
-
-        if vocals_file and os.path.exists(vocals_file):
-            # Update chunk with cleaned audio path
-            processed_chunks.append({
-                **chunk,
-                'file': vocals_file,
-                '_original_file': audio_file,
-                '_demucs': {
-                    'model': model,
-                    'cleaned': True
-                }
-            })
-            stats['success'] += 1
-        else:
-            # Keep original on failure
-            processed_chunks.append({
-                **chunk,
-                '_demucs': {
-                    'model': model,
-                    'cleaned': False,
-                    'error': 'separation_failed'
-                }
-            })
-            stats['failed'] += 1
-
-    print(f"\nDemucs processing complete:", file=sys.stderr)
-    print(f"  Success: {stats['success']}", file=sys.stderr)
-    print(f"  Failed: {stats['failed']}", file=sys.stderr)
-    print(f"  Skipped: {stats['skipped']}", file=sys.stderr)
-
-    return {
-        'chunks': processed_chunks,
-        'stats': stats
-    }
+def progress(done, total, detail):
+    print('YESILCAM_PROGRESS ' + json.dumps({'completed': done, 'total': total, 'detail': detail}), file=sys.stderr, flush=True)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Demucs Audio Cleaning')
-    parser.add_argument('audio_file', nargs='?', help='Single audio file to process')
-    parser.add_argument('--batch', help='JSON file with chunks list for batch processing')
-    parser.add_argument('--output', '-o', required=False, help='Output directory')
-    parser.add_argument('--check', action='store_true', help='Check if demucs is available')
-    parser.add_argument('--model', default='htdemucs_ft', help='Demucs model (htdemucs, htdemucs_ft, mdx_extra)')
-    parser.add_argument('--device', default='cpu', help='Device (cpu or cuda)')
-    parser.add_argument('--shifts', type=int, default=1, help='Number of shifts for quality (1-5)')
-
+    parser = argparse.ArgumentParser()
+    parser.add_argument('audio_file', nargs='?')
+    parser.add_argument('--batch')
+    parser.add_argument('--output')
+    parser.add_argument('--model', default='htdemucs_ft')
+    parser.add_argument('--device', default='cuda')
+    parser.add_argument('--shifts', type=int, default=0)
+    parser.add_argument('--overlap', type=float, default=0.25)
+    parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
-
-    # Check mode
+    import torch
+    import numpy as np
+    from scipy.io import wavfile
+    from demucs.pretrained import get_model
+    from demucs.apply import apply_model
     if args.check:
-        result = check_dependencies()
-        print(json.dumps(result))
-        sys.exit(0 if result['installed'] else 1)
-
-    # Batch mode
-    if args.batch:
-        if not os.path.exists(args.batch):
-            print(json.dumps({'error': f'File not found: {args.batch}'}))
-            sys.exit(1)
-
-        output_dir = args.output or './temp/demucs'
-
-        with open(args.batch, 'r') as f:
-            data = json.load(f)
-
-        chunks = data if isinstance(data, list) else data.get('chunks', [])
-
-        result = process_chunks(
-            chunks,
-            output_dir,
-            model=args.model,
-            device=args.device,
-            shifts=args.shifts
-        )
-
-        # Output result
-        if args.output:
-            output_file = os.path.join(args.output, 'demucs_result.json')
-            with open(output_file, 'w') as f:
-                json.dump(result, f, indent=2)
-            print(f"Results saved to: {output_file}", file=sys.stderr)
-
-        print(json.dumps(result))
-        sys.exit(0)
-
-    # Single file mode
-    if args.audio_file:
-        if not os.path.exists(args.audio_file):
-            print(json.dumps({'error': f'File not found: {args.audio_file}'}))
-            sys.exit(1)
-
-        output_dir = args.output or './temp/demucs'
-
-        vocals_file = separate_vocals(
-            args.audio_file,
-            output_dir,
-            model_name=args.model,
-            device=args.device,
-            shifts=args.shifts
-        )
-
-        if vocals_file:
-            print(json.dumps({
-                'success': True,
-                'input': args.audio_file,
-                'output': vocals_file
-            }))
-            sys.exit(0)
-        else:
-            print(json.dumps({
-                'success': False,
-                'input': args.audio_file,
-                'error': 'separation_failed'
-            }))
-            sys.exit(1)
-
-    parser.print_help()
-    sys.exit(1)
+        print(json.dumps({'installed': True, 'cuda_available': torch.cuda.is_available()}))
+        return
+    if not args.output or not (args.batch or args.audio_file):
+        parser.error('Provide input and --output')
+    if not 0 <= args.overlap < 1 or args.shifts < 0:
+        parser.error('Invalid shifts or overlap')
+    torch.set_num_threads(max(1, int(os.getenv('OMP_NUM_THREADS', '2'))))
+    device = args.device
+    if device == 'cuda' and not torch.cuda.is_available():
+        print('CUDA unavailable; Demucs is using CPU.', file=sys.stderr)
+        device = 'cpu'
+    # Keep a bag's weights on CPU. apply_model moves one submodel at a time to
+    # the GPU and returns it to CPU, instead of occupying VRAM with all four.
+    model = get_model(args.model).eval()
+    vocal_index = model.sources.index('vocals')
+    output = Path(args.output)
+    output.mkdir(parents=True, exist_ok=True)
+    data = json.loads(Path(args.batch).read_text(encoding='utf-8')) if args.batch else [{'id': 0, 'file': args.audio_file}]
+    chunks = data if isinstance(data, list) else data['chunks']
+    result = []
+    for index, chunk in enumerate(chunks):
+        source = Path(chunk['file'])
+        target = output / f'chunk_{int(chunk.get("id", index)):05d}_vocals.wav'
+        metadata_file = target.with_suffix('.json')
+        source_hash = hashlib.sha256()
+        with source.open('rb') as source_handle:
+            for block in iter(lambda: source_handle.read(1024 * 1024), b''):
+                source_hash.update(block)
+        identity = {'source_sha256': source_hash.hexdigest(), 'model': args.model,
+                    'device': device, 'shifts': args.shifts, 'overlap': args.overlap}
+        if target.exists() and metadata_file.exists():
+            saved = json.loads(metadata_file.read_text(encoding='utf-8'))
+            if saved.get('identity') == identity and saved.get('size') == target.stat().st_size:
+                result.append({**chunk, 'file': str(target), '_original_file': str(source), '_demucs': identity})
+                print(f'Reusing separated chunk {index + 1}/{len(chunks)}', file=sys.stderr, flush=True)
+                progress(index + 1, len(chunks), f'Reused vocal chunk {index + 1}/{len(chunks)}')
+                continue
+        print(f'Separating {index + 1}/{len(chunks)}: {source.name}', file=sys.stderr, flush=True)
+        progress(index, len(chunks), f'Separating chunk {index + 1}/{len(chunks)}')
+        # Decode each bounded chunk directly at the model rate. No lossy intermediary.
+        decoded = subprocess.run([
+            'ffmpeg', '-v', 'error', '-nostdin', '-i', str(source), '-vn',
+            '-ar', str(model.samplerate), '-ac', str(model.audio_channels),
+            '-f', 'f32le', '-acodec', 'pcm_f32le', 'pipe:1'
+        ], capture_output=True, check=True, timeout=120)
+        samples = np.frombuffer(decoded.stdout, dtype='<f4').copy()
+        if not len(samples):
+            raise ValueError(f'Empty audio: {source}')
+        wav = torch.from_numpy(samples.reshape(-1, model.audio_channels).T.copy())
+        ref = wav.mean(0)
+        mean, std = ref.mean(), ref.std(unbiased=False)
+        normalized = (wav - mean) / (std + 1e-8)
+        with torch.inference_mode():
+            sources = apply_model(model, normalized[None], device=device,
+                                  shifts=args.shifts, overlap=args.overlap,
+                                  split=True, progress=False, num_workers=0)
+            vocals = sources[0, vocal_index].cpu() * (std + 1e-8) + mean
+        if not torch.isfinite(vocals).all():
+            raise ValueError('Demucs returned non-finite audio')
+        temporary = target.with_suffix('.tmp.wav')
+        wavfile.write(temporary, model.samplerate, vocals.T.numpy().astype(np.float32))
+        temporary.replace(target)
+        metadata_temp = metadata_file.with_suffix('.tmp.json')
+        metadata_temp.write_text(json.dumps({'identity': identity, 'size': target.stat().st_size}), encoding='utf-8')
+        metadata_temp.replace(metadata_file)
+        progress(index + 1, len(chunks), f'Vocal chunk {index + 1}/{len(chunks)} saved')
+        result.append({**chunk, 'file': str(target), '_original_file': str(source),
+                       '_demucs': {'model': args.model, 'device': device,
+                                   'shifts': args.shifts, 'overlap': args.overlap}})
+        del sources, vocals, wav, normalized
+    print(json.dumps({'chunks': result, 'stats': {'total': len(chunks), 'success': len(result)}}))
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as exc:
+        print(f'Demucs failed: {exc}', file=sys.stderr)
+        sys.exit(1)

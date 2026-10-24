@@ -1,0 +1,218 @@
+import './environment.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { at, atomicWrite, readJson, serialized, writeJson } from './files.js';
+
+export const credentialFields = [
+  ['OPENROUTER_API_KEY', 'OpenRouter', true],
+  ['OPENAI_API_KEY', 'OpenAI', true],
+  ['GROQ_API_KEY', 'Groq', true],
+  ['MISTRAL_API_KEY', 'Mistral', true],
+  ['DEEPGRAM_API_KEY', 'Deepgram', true],
+  ['ASSEMBLYAI_API_KEY', 'AssemblyAI', true],
+  ['ELEVENLABS_API_KEY', 'ElevenLabs', true],
+  ['GEMINI_API_KEY', 'Google Gemini', true],
+  ['XAI_API_KEY', 'Grok / xAI', true],
+  ['SPEECHMATICS_API_KEY', 'Speechmatics', true],
+  ['GLADIA_API_KEY', 'Gladia', true],
+  ['TRANSCRIPTION_API_KEY', 'Custom endpoint key', true],
+  ['TRANSCRIPTION_API_URL', 'Custom transcription URL', false],
+  ['SPEECHMATICS_REGION', 'Speechmatics region (eu1 or us1)', false],
+  ['OPENSUBTITLES_API_KEY', 'OpenSubtitles API key', true],
+  ['OPENSUBTITLES_TOKEN', 'OpenSubtitles token', true],
+  ['OPENSUBTITLES_USER_AGENT', 'OpenSubtitles user agent', false],
+  ['YOUTUBE_COOKIES', 'YouTube cookies (Netscape format)', true],
+] as const;
+export type CredentialName = (typeof credentialFields)[number][0];
+interface Envelope {
+  iv: string;
+  tag: string;
+  data: string;
+  updatedAt: string;
+}
+interface Vault {
+  version: 1;
+  values: Partial<Record<CredentialName, Envelope | null>>;
+}
+const directory = at('data', 'private');
+const vaultFile = path.join(directory, 'credentials.json');
+const keyFile = path.join(directory, 'master.key');
+let masterKey: Buffer | undefined;
+
+export function credentialName(name: string): CredentialName {
+  if (!credentialFields.some((field) => field[0] === name))
+    throw Object.assign(new Error('Unknown connection field'), { status: 400 });
+  return name as CredentialName;
+}
+export async function initializeCredentials(): Promise<void> {
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  await fs.chmod(directory, 0o700);
+  try {
+    masterKey = await fs.readFile(keyFile);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    // Never silently replace a lost encryption key for an existing vault.
+    if (
+      await fs.stat(vaultFile).then(
+        () => true,
+        (failure) => {
+          if (failure.code === 'ENOENT') return false;
+          throw failure;
+        },
+      )
+    )
+      throw new Error('Credential encryption key is missing; restore data/private from backup');
+    const candidate = randomBytes(32);
+    try {
+      const handle = await fs.open(keyFile, 'wx', 0o600);
+      try {
+        await handle.writeFile(candidate);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      masterKey = candidate;
+    } catch (failure) {
+      if (failure.code !== 'EEXIST') throw failure;
+      masterKey = await fs.readFile(keyFile);
+    }
+  }
+  if (masterKey.length !== 32) throw new Error('Invalid credential encryption key');
+  await fs.chmod(keyFile, 0o600);
+}
+async function readVault(): Promise<Vault> {
+  const vault = await readJson<Vault>(vaultFile, { version: 1, values: {} });
+  if (
+    vault.version !== 1 ||
+    !vault.values ||
+    typeof vault.values !== 'object' ||
+    Array.isArray(vault.values)
+  )
+    throw new Error('Invalid credential vault');
+  return vault;
+}
+export async function credential(name: string | null): Promise<string | undefined> {
+  if (!name) return undefined;
+  const field = credentialName(name);
+  const vault = await readVault();
+  const value = vault.values[field];
+  // A clear action masks an old environment key, instead of resurrecting it.
+  if (value === null) return undefined;
+  if (value === undefined) return process.env[field] || undefined;
+  if (!masterKey) await initializeCredentials();
+  const decipher = createDecipheriv('aes-256-gcm', masterKey!, Buffer.from(value.iv, 'base64'));
+  decipher.setAAD(Buffer.from(field));
+  decipher.setAuthTag(Buffer.from(value.tag, 'base64'));
+  return Buffer.concat([
+    decipher.update(Buffer.from(value.data, 'base64')),
+    decipher.final(),
+  ]).toString('utf8');
+}
+export async function credentialStatus() {
+  const vault = await readVault();
+  return Promise.all(
+    credentialFields.map(async ([name, label, secret]) => ({
+      name,
+      label,
+      secret,
+      configured: Boolean(await credential(name)),
+      source:
+        vault.values[name] === null
+          ? 'cleared'
+          : vault.values[name]
+            ? 'saved'
+            : process.env[name]
+              ? 'environment'
+              : 'missing',
+      updatedAt: vault.values[name]?.updatedAt ?? null,
+      // Only non-secret settings may be read back into the form.
+      value: secret ? undefined : ((await credential(name)) ?? ''),
+    })),
+  );
+}
+function validateValue(name: CredentialName, value: unknown): string {
+  if (typeof value !== 'string' || !value.trim())
+    throw Object.assign(new Error('Enter a value, or use Clear to remove it'), { status: 400 });
+  const text = value.trim();
+  if (Buffer.byteLength(text) > (name === 'YOUTUBE_COOKIES' ? 256 * 1024 : 8192))
+    throw Object.assign(new Error('Connection value is too large'), { status: 400 });
+  if (name === 'YOUTUBE_COOKIES') {
+    if (!/^# (?:Netscape HTTP Cookie File|HTTP Cookie File)/.test(text) || text.includes('\0'))
+      throw Object.assign(new Error('Use a Netscape cookies.txt export'), { status: 400 });
+  } else if (/[\x00-\x1f\x7f]/.test(text))
+    throw Object.assign(new Error('Connection value contains invalid characters'), { status: 400 });
+  if (name === 'SPEECHMATICS_REGION' && !['eu1', 'us1'].includes(text))
+    throw Object.assign(new Error('Choose eu1 or us1'), { status: 400 });
+  if (name === 'TRANSCRIPTION_API_URL') {
+    let url: URL;
+    try {
+      url = new URL(text);
+    } catch {
+      throw Object.assign(new Error('Enter a complete transcription endpoint URL'), {
+        status: 400,
+      });
+    }
+    if (
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      !(
+        url.protocol === 'https:' ||
+        (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))
+      )
+    ) {
+      throw Object.assign(
+        new Error('Use HTTPS (or loopback HTTP), without URL credentials or query parameters'),
+        { status: 400 },
+      );
+    }
+  }
+  return text;
+}
+export async function saveCredential(name: string, value: unknown): Promise<void> {
+  const field = credentialName(name),
+    text = validateValue(field, value);
+  if (!masterKey) await initializeCredentials();
+  await serialized(vaultFile, async () => {
+    const vault = await readVault(),
+      iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', masterKey!, iv);
+    cipher.setAAD(Buffer.from(field));
+    const data = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
+    vault.values[field] = {
+      iv: iv.toString('base64'),
+      tag: cipher.getAuthTag().toString('base64'),
+      data: data.toString('base64'),
+      updatedAt: new Date().toISOString(),
+    };
+    await writeJson(vaultFile, vault);
+  });
+}
+export async function clearCredential(name: string): Promise<void> {
+  const field = credentialName(name);
+  await serialized(vaultFile, async () => {
+    const vault = await readVault();
+    vault.values[field] = null;
+    await writeJson(vaultFile, vault);
+  });
+}
+export async function withYouTubeCookies<T>(operation: (file?: string) => Promise<T>): Promise<T> {
+  const cookies = await credential('YOUTUBE_COOKIES');
+  if (!cookies) return operation();
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  const temp = await fs.mkdtemp(path.join(directory, 'youtube-'));
+  try {
+    const file = path.join(temp, 'cookies.txt');
+    await atomicWrite(file, cookies + '\n');
+    return await operation(file);
+  } finally {
+    await fs.rm(temp, { recursive: true, force: true });
+  }
+}
+export async function clearStaleCookieFiles(): Promise<void> {
+  for (const name of await fs.readdir(directory))
+    if (/^youtube-[a-zA-Z0-9]+$/.test(name))
+      await fs.rm(path.join(directory, name), { recursive: true, force: true });
+}

@@ -1,32 +1,35 @@
-# Dependencies
+# Dependencies and environments
 node_modules/
+build/
+*.tsbuildinfo
+.venv/
+.venv-*/
+venv/
 whisperx_venv/
-
-# Environment
+# Credentials and machine-local settings
 .env
-
-# Temporary files
+.env.*
+!.env.example
+cookies*.txt
+*cookies*.json
+*.key
+*.local.*
+# Media, durable state and generated artifacts
 temp/
+data/
+movies/
+found/
+output/
+review-sessions/
 *.tmp
-
-# Output files (optional - uncomment if you want to track outputs)
-# output/
-
-# Logs
 *.log
 npm-debug.log*
-
-# OS files
+# Python and editor artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.Python
 .DS_Store
 Thumbs.db
-
-# IDE
 .vscode/
 .idea/
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-.Python
-*.egg-info/
