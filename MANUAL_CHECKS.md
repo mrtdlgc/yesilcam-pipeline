@@ -162,6 +162,15 @@ model or scaling to the film catalogue.
 
 ## 12. Automatic screening and corrections
 
+Submit an MKV with full source-language text subtitles and enable translation: the subtitle-search
+stage should identify the track, ASR/audio preparation should be skipped, and translated cue times
+should match the extracted source exactly. Repeat with a target-language track (translation also
+skipped), multiple languages, default SDH plus plain dialogue, ASS and MP4 text. Forced/signs-only,
+commentary, image-based, unknown-language and clearly incomplete tracks should fall back with an
+explanation. Check Job Details for provenance and original/track-report downloads. Fail translation
+and retry: extraction and ASR must not rerun. New ASR-based editorial jobs must use only metadata
+for frame rate, without a whole-film scene scan before or after translation.
+
 Complete a short video job with temporary retention off. Its **Prepare screening** bar should finish
 and **Watch & correct** should open working video and subtitles after the temporary source is gone.
 Try a YouTube source too: the new download should include video up to 720p. Check seeking,

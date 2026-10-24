@@ -61,8 +61,10 @@ Enable the per-film translation checkbox in Studio. For watched films, set
 | `CLOUD_PRICE_PER_MINUTE`   | Empty                             | Optional account-specific rate for new/scanned jobs          |
 | `TRANSLATION_ENABLED`      | `false`                           | Enable Codex automatically for new/scanned films             |
 
-Library scanning uses server defaults, not unsaved Studio form values. It verifies that required
-credentials/login are configured, waits for stable files, and deduplicates by filename, size and
+Library scanning uses server defaults, not unsaved Studio form values. Enabling automatic watching
+checks credentials/login for fallback processing. Each job checks embedded subtitles first and
+requires ASR credentials only if it actually needs audio processing; a missing fallback key fails
+before preparing audio. Scanning waits for stable files and deduplicates by filename, size and
 modification time. Source changes after queueing fail safely. **Scan now** performs a single scan
 even when watching is off; manual scans take two observations one second apart. Automatic watching
 requires ten seconds of stability. Paused queues do not enqueue from scans. Enabling watching never

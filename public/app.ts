@@ -600,6 +600,18 @@ async function showJob(id: string) {
     details.append(
       download(`Source subtitles (${result.sourceLanguage || 'original'})`, result.subtitleFile),
     );
+  if (result.subtitleOrigin)
+    details.append(
+      element(
+        'p',
+        `Used ${result.subtitleOrigin.language} subtitles from ${result.subtitleOrigin.source}${result.subtitleOrigin.title ? ` · ${result.subtitleOrigin.title}` : ''}. Transcription was skipped.`,
+        'muted',
+      ),
+    );
+  if (result.existingSubtitleFile)
+    details.append(download('Original reused subtitle track', result.existingSubtitleFile));
+  if (result.embeddedSubtitleReportFile)
+    details.append(download('Embedded subtitle track report', result.embeddedSubtitleReportFile));
   if (result.englishSubtitleFile)
     details.append(
       download(`Subtitles (${result.targetLanguage || 'en'})`, result.englishSubtitleFile),

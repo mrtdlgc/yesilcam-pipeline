@@ -39,10 +39,14 @@ choice, not proof of accuracy on every film.
 
 All inputs—audio uploads, YouTube videos, watched films, and resumed jobs—use `scripts/pipeline.ts`:
 
-1. Check for usable target-language subtitles. Local films can reuse embedded text subtitles or an
-   exact OpenSubtitles movie-hash match. IMDb-only matches are saved as references and never skip
-   transcription. Machine-translated matches are excluded; exact movie-hash matches are preferred
-   and ranked by downloads. Provider failures are logged and generation continues.
+1. Check local films for embedded text subtitles before preparing audio. Prefer a full
+   target-language track, then the requested source language, selected audio language, and other
+   labelled dialogue tracks. Reuse an existing target track directly; translate other tracks with
+   their timing intact. Forced, signs/song-only, commentary, image-based, unlabelled and clearly
+   incomplete tracks do not replace full dialogue. When no usable track exists, check YouTube
+   captions or an exact OpenSubtitles movie-hash match before transcription. IMDb-only matches
+   remain references. Machine-translated online matches are excluded; provider failures are logged
+   and generation continues.
 2. Choose request granularity. **Direct ElevenLabs + Automatic/Full movie** prepares one continuous
    16 kHz mono FLAC, including all music and silence. Other providers and explicit **Short chunks**
    keep energy-selected chunks and film offsets. New cloud chunks use 16 kHz mono signed-16 FLAC;
@@ -262,6 +266,20 @@ Choose **Exact timing** when synchronization must stay identical. Uploaded subti
 without a mode default to this option. Cue IDs, order and timing lines are checked and copied
 exactly into UTF-8 BOM / CRLF output. No cues, including lyrics, may be omitted in this mode.
 
+Reused embedded subtitles automatically use **Exact timing**: their established cues do not pass
+through ASR splitting/alignment or editorial regrouping. MKV SRT/ASS/SSA and MP4 text tracks are
+converted to SRT locally; language aliases such as `eng`/`en` are recognized. Plain dialogue tracks
+are preferred over SDH, but full SDH tracks remain usable. PGS/VobSub and other image subtitles need
+OCR, which is not automatic; missing-language and partial tracks are reported and generation falls
+back to transcription. Subtitle tracks cannot prove complete dialogue coverage, so review sparse
+passages. For films at least ten minutes long, tracks with fewer than ten cues or ending before
+halfway are treated as incomplete. Job Details shows the selected source and offers the original
+extracted subtitle and track report. Translation retries reuse the saved, hash-checked track and
+never pay for ASR just because translation failed. Existing completed jobs and edits are unchanged.
+Local uploads inspect subtitles before requiring ASR credentials; if discovery finds no usable
+track, provider readiness is checked before preparing audio. Codex login is needed only when a
+translation is actually performed on the reused track.
+
 Editorial mode translates story-relevant songs in italics and allows incidental background lyrics to
 be omitted with a recorded reason. Omitted lyrics and their translation remain in the correction
 editor and can be restored. An omission needs explicit lyric markers or singing evidence tied to the
@@ -278,13 +296,13 @@ transcript stays unchanged. Recognized songs still require listening where attri
 uncertain.
 
 The final renderer uses source-word bounds, natural line wrapping, duration and reading-speed
-checks. It allows up to half a second of trailing display time where space permits. For new video
-jobs translated immediately, an optional FFmpeg scene-cut scan uses two CPU threads, low-resolution
-frames and a ten-minute maximum, then retains its results with the source evidence. Continuous
-speech is not cut to fit a scene change. Constant-frame-rate video supplies the two-frame gap;
+checks. It allows up to half a second of trailing display time where space permits. Whole-film
+scene-cut scanning has been removed: decoding the video was too costly for this optional refinement.
+Only a quick container metadata probe supplies duration and the constant-frame-rate two-frame gap;
 audio-only or unverified frame rates use an 80 ms fallback. Unavoidable overlaps, short cues and
-fast reading are flagged without discarding dialogue. Missing scene analysis is reported.
-`EDITORIAL_SHOT_DETECTION=false` skips the scan.
+fast reading are flagged without discarding dialogue. Existing cached scene evidence stays readable
+for translation recovery, but new jobs never scan video frames. Final visual timing adjustments can
+be made against the video and waveform in the correction editor.
 
 The translation report includes token usage, source-anchor ranges, song decisions, proposed source
 repairs and readability notes. Paired review files follow the new cue boundaries; original source

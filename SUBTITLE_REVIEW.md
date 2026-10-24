@@ -4,6 +4,12 @@ Completed jobs automatically prepare a screening. Choose **Watch & correct** on 
 `review-player.html?job=JOB_ID`. Subtitles are usable immediately; there is no approval state or
 requirement to mark good cues. Watch and edit only the problematic passages.
 
+For local films, a suitable embedded subtitle track is extracted before any audio preparation or
+ASR. Source tracks go directly to exact-timing translation; tracks already in the target language
+need neither transcription nor translation. Job Details identifies the reused track and preserves
+its original SRT and selection report. Whole-film scene-cut scanning is removed; use the video and
+waveform for any final visual timing refinements.
+
 ## Correction workflow
 
 - Press **E** or **Edit current cue** to pause on a line. Turkish/source dialogue and its
@@ -85,7 +91,7 @@ only provide audio review when that is the retained source.
 | `review-sessions/JOB_ID/screening.mp4` or `.webm`              | Durable screening media                                                           |
 | `review-sessions/JOB_ID/waveform.json`                         | Cached audio peaks/energy and screening media identity                            |
 | `output/subtitles/`                                            | Unchanged generated subtitle files                                                |
-| `output/reviews/JOB_ID-editorial-source.json`                  | Native source anchors, scoped voices, audio events and available scene cuts       |
+| `output/reviews/JOB_ID-editorial-source.json`                  | Native source anchors, scoped voices, audio events and timing metadata            |
 | `output/reviews/*-paired-source.srt` and `*-paired-target.srt` | Matching editorial review tracks, including omitted lyrics                        |
 | `output/reviews/JOB_ID-translation.json`                       | Source coverage, editorial decisions, repairs and paired-track hashes             |
 

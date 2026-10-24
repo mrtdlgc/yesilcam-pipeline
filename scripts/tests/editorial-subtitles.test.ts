@@ -17,7 +17,7 @@ const { createSubtitleReview, editSubtitleReview, reviewExport } =
 const { prepareSubtitleReview } = await import('../lib/review-preparation.js');
 const { at, writeJson } = await import('../lib/files.js');
 const { config } = await import('../../config.js');
-const { shotBoundaries } = await import('../lib/shot-boundaries.js');
+const { mediaTiming } = await import('../lib/media-timing.js');
 const { run } = await import('../lib/process.js');
 const { subtitleHash } = await import('../lib/speakers.js');
 
@@ -333,7 +333,7 @@ test('review preparation uses mapped bilingual cues and verifies their hashes', 
 });
 
 test(
-  'scene-cut evidence uses actual video frame times in a short local fixture',
+  'timing metadata retains frame rate and duration without decoding video for scene cuts',
   { timeout: 10000 },
   async () => {
     const video = path.join(root, 'cuts.mp4');
@@ -370,14 +370,25 @@ test(
       ],
       { timeout: 5000 },
     );
-    const result = await shotBoundaries(video);
-    assert.equal(result.frameRate, 24);
-    assert.equal(result.shotDetection, 'complete');
-    assert.ok(result.cuts.some((cut) => Math.abs(cut - 1) < 1 / 24));
-    assert.equal(
-      (await shotBoundaries(video, { settings: { EDITORIAL_SHOT_DETECTION: false } }))
-        .shotDetection,
-      'not-run',
+    const bin = path.join(root, 'no-scene-decoder');
+    await fs.mkdir(bin);
+    const marker = path.join(root, 'unexpected-video-decode');
+    await fs.writeFile(
+      path.join(bin, 'ffmpeg'),
+      `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(marker)}, 'called');process.exit(1);\n`,
+      { mode: 0o700 },
     );
+    const priorPath = process.env.PATH;
+    process.env.PATH = `${bin}${path.delimiter}${priorPath}`;
+    try {
+      const result = await mediaTiming(video);
+      assert.equal(result.frameRate, 24);
+      assert.equal(result.duration, 2);
+      assert.equal(result.shotDetection, 'not-run');
+      assert.deepEqual(result.cuts, []);
+      await assert.rejects(fs.access(marker), { code: 'ENOENT' });
+    } finally {
+      process.env.PATH = priorPath;
+    }
   },
 );

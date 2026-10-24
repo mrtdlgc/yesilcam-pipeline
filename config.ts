@@ -134,7 +134,6 @@ export const config = {
   TRANSLATION_PROVIDER: 'codex-local', // Local Codex CLI with ChatGPT login
   TRANSLATION_MODE: 'editorial', // New media jobs; uploaded SRT defaults to fixed timings
   TRANSLATION_SONG_REFERENCES: '', // Optional titles, performance notes or supplied lyric references
-  EDITORIAL_SHOT_DETECTION: true, // Reusable low-resolution scene-cut analysis for video
   CODEX_BIN: process.env.CODEX_BIN || 'codex',
   CODEX_MODEL: process.env.CODEX_MODEL || '', // Empty uses the installed CLI default
   CODEX_TRANSLATION_TIMEOUT_MS: Number(process.env.CODEX_TRANSLATION_TIMEOUT_MS || 30 * 60 * 1000),

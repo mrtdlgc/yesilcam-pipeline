@@ -13,7 +13,7 @@ import {
   writeJson,
   atomicWrite,
 } from './lib/files.js';
-import { checkAbort, probe, run } from './lib/process.js';
+import { checkAbort, probe } from './lib/process.js';
 import { withTempBudget } from './lib/storage.js';
 import { checkExistingSubtitles } from './0_check_subs.js';
 import { downloadVideo } from './1_download_video.js';
@@ -40,7 +40,10 @@ import { prepareMovieAudio } from './lib/movie-audio.js';
 import { speakerContext, subtitleHash } from './lib/speakers.js';
 import { writeSubtitleArtifacts } from './lib/subtitle-export.js';
 import { editorialSource, validateEditorialSource } from './lib/editorial-subtitles.js';
-import { shotBoundaries } from './lib/shot-boundaries.js';
+import { mediaTiming } from './lib/media-timing.js';
+import { extractEmbeddedSubtitles } from './lib/embedded-subtitles.js';
+import type { ExistingSubtitle } from './lib/embedded-subtitles.js';
+import { assertPipelineProviders } from './lib/pipeline-readiness.js';
 import type { EditorialSource } from '../types/editorial.js';
 
 export function validateSettings(settings: Settings) {
@@ -226,61 +229,49 @@ export async function postprocessRecords(
   return result;
 }
 
-async function embeddedTarget(input: any, targetLanguage: string, options: any) {
-  const info = await probe(input, { signal: options.signal });
-  const aliases: Record<string, string[]> = {
-    en: ['en', 'eng'],
-    tr: ['tr', 'tur'],
-    uk: ['uk', 'ukr'],
-    ru: ['ru', 'rus'],
-    de: ['de', 'deu', 'ger'],
-    fr: ['fr', 'fra', 'fre'],
-    es: ['es', 'spa'],
-    it: ['it', 'ita'],
-    ar: ['ar', 'ara'],
-    fa: ['fa', 'fas', 'per'],
-    el: ['el', 'ell', 'gre'],
-    nl: ['nl', 'nld', 'dut'],
-    pt: ['pt', 'por'],
-    pl: ['pl', 'pol'],
-    ro: ['ro', 'ron', 'rum'],
-    zh: ['zh', 'zho', 'chi'],
-    ja: ['ja', 'jpn'],
-    ko: ['ko', 'kor'],
-    hi: ['hi', 'hin'],
-    he: ['he', 'heb'],
-    cs: ['cs', 'ces', 'cze'],
-    sv: ['sv', 'swe'],
-    da: ['da', 'dan'],
-    no: ['no', 'nor'],
-    fi: ['fi', 'fin'],
-    hu: ['hu', 'hun'],
-    bg: ['bg', 'bul'],
-    sr: ['sr', 'srp'],
-    hr: ['hr', 'hrv'],
-    sk: ['sk', 'slk', 'slo'],
-    th: ['th', 'tha'],
-    vi: ['vi', 'vie'],
-    id: ['id', 'ind'],
-  };
-  const stream = info.streams.find(
-    (s: any) =>
-      s.codec_type === 'subtitle' &&
-      (aliases[targetLanguage] ?? [targetLanguage]).includes(s.tags?.language) &&
-      ['subrip', 'ass', 'ssa', 'mov_text', 'webvtt'].includes(s.codec_name),
-  );
-  if (!stream) return null;
-  const { stdout } = await run(
-    'ffmpeg',
-    ['-v', 'error', '-nostdin', '-i', input, '-map', `0:${stream.index}`, '-f', 'srt', 'pipe:1'],
-    { signal: options.signal, timeout: 120000 },
-  );
-  if (!parseSrt(stdout).length) return null;
-  return { content: stdout, language: targetLanguage, source: 'embedded' };
-}
-
 function publicFile(file: string) {
   return `/${path.relative(DATA_ROOT, file).split(path.sep).map(encodeURIComponent).join('/')}`;
+}
+
+async function reuseSubtitles(manifest: any, existing: ExistingSubtitle | null, options: any) {
+  if (existing) {
+    const { content, ...origin } = existing;
+    const file = at(
+      'found',
+      `${titleSlug(manifest.title)}_${manifest.id}_${existing.source}_${existing.language}.srt`,
+    );
+    await atomicWrite(file, content);
+    manifest.existingSource = existing.source;
+    manifest.existingSubtitles = { ...origin, file, hash: subtitleHash(content) };
+    manifest.lookedUp = true;
+    // Existing subtitle tracks already have editorial timing. Translate their text exactly in place.
+    manifest.settings.TRANSLATION_MODE = 'fixed';
+    await writeJson(at('temp', manifest.id, 'manifest.json'), manifest);
+  }
+  const saved = manifest.existingSubtitles;
+  const content = await fs.readFile(saved.file, 'utf8');
+  if (subtitleHash(content) !== saved.hash)
+    throw new Error('Saved existing subtitles changed; restore the saved track or start a new job');
+  await options.onStage?.({
+    id: 'subtitles',
+    status: 'completed',
+    detail: `Using ${saved.language} subtitles from ${saved.source}${saved.streamIndex !== undefined ? ` track ${saved.streamIndex}` : ''}; transcription is unnecessary`,
+  });
+  for (const stage of [
+    'download',
+    'chunking',
+    'demucs',
+    'vad',
+    'transcription',
+    'filtering',
+    'alignment',
+  ] as const)
+    await options.onStage?.({
+      id: stage,
+      status: 'skipped',
+      detail: 'Reusing existing subtitles; no audio processing needed',
+    });
+  return finalize(manifest, content, saved.language, options);
 }
 
 async function finalize(manifest: any, srt: string, sourceLanguage: string, options: any) {
@@ -311,6 +302,13 @@ async function finalize(manifest: any, srt: string, sourceLanguage: string, opti
     reviewFile: manifest.chunks ? `/output/reviews/${id}.json` : null,
     usageFile: manifest.chunks ? `/output/raw_transcriptions/${id}/usage.json` : null,
   };
+  if (manifest.embeddedSubtitleReportFile)
+    result.embeddedSubtitleReportFile = manifest.embeddedSubtitleReportFile;
+  if (manifest.existingSubtitles) {
+    const { file, hash, ...origin } = manifest.existingSubtitles;
+    result.existingSubtitleFile = publicFile(file);
+    result.subtitleOrigin = origin;
+  }
   if (options.speakers) {
     const file = at('output', 'reviews', `${id}-speakers.json`);
     await writeJson(file, { ...options.speakers, sourceHash: subtitleHash(srt) });
@@ -329,12 +327,11 @@ async function finalize(manifest: any, srt: string, sourceLanguage: string, opti
       settings.TRANSLATION_MODE === 'editorial'
     ) {
       try {
-        Object.assign(evidence, await shotBoundaries(manifest.input, options));
+        Object.assign(evidence, await mediaTiming(manifest.input, options));
       } catch (error) {
         checkAbort(options.signal);
-        evidence.shotDetection = 'unavailable';
         await options.onWarning?.(
-          'Scene-cut analysis unavailable; source audio timing is retained for review.',
+          'Media timing metadata unavailable; source audio timing is retained for review.',
         );
       }
     }
@@ -602,19 +599,31 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
   };
   if (manifest.stage === 'completed') return manifest.result;
   if (!manifest.chunks) {
+    if (manifest.existingSubtitles) return reuseSubtitles(manifest, null, common);
     if (!manifest.lookedUp) {
-      await progress(5, 'Checking for usable target-language subtitles');
+      await progress(5, 'Checking embedded and online subtitles before transcription');
       await options.onStage?.({
         id: 'subtitles',
         percentage: null,
-        detail: 'Searching for usable target-language subtitles',
+        detail: 'Checking embedded and online subtitle tracks',
       });
       let existing;
       if (manifest.type === 'video') {
         try {
-          existing = await embeddedTarget(manifest.input, settings.TARGET_LANGUAGE, common);
+          const embedded = await extractEmbeddedSubtitles(manifest.input, {
+            ...common,
+            sourceLanguage: settings.DEFAULT_LANGUAGE,
+            targetLanguage: settings.TARGET_LANGUAGE,
+            sourceStat: manifest.sourceStat,
+          });
+          manifest.sourceStat ??= embedded.sourceStat;
+          const reportFile = at('output', 'reviews', `${id}-embedded-subtitles.json`);
+          await writeJson(reportFile, embedded.report);
+          manifest.embeddedSubtitleReportFile = publicFile(reportFile);
+          existing = embedded.subtitle;
         } catch (error) {
           checkAbort(options.signal);
+          if (error.code === 'SOURCE_CHANGED') throw error;
           await warning(`Embedded subtitle check failed: ${error.message}`);
         }
       }
@@ -632,29 +641,7 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
         );
         existing = null;
       }
-      if (existing) {
-        manifest.existingSource = existing.source;
-        await options.onStage?.({
-          id: 'subtitles',
-          status: 'completed',
-          detail: 'Usable existing subtitles found',
-        });
-        for (const stage of [
-          'download',
-          'chunking',
-          'demucs',
-          'vad',
-          'transcription',
-          'filtering',
-          'alignment',
-        ] as const)
-          await options.onStage?.({
-            id: stage,
-            status: 'skipped',
-            detail: 'Reusing existing subtitles',
-          });
-        return finalize(manifest, existing.content, existing.language, common);
-      }
+      if (existing) return reuseSubtitles(manifest, existing, common);
       manifest.lookedUp = true;
       await writeJson(manifestFile, manifest);
     }
@@ -663,6 +650,7 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
       status: 'completed',
       detail: 'Subtitle search completed',
     });
+    await assertPipelineProviders(settings);
     if (!manifest.input) {
       await progress(8, 'Downloading source audio');
       await options.onStage?.({

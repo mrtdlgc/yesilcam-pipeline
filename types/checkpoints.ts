@@ -61,6 +61,16 @@ export interface Manifest {
   originalChunks?: Chunk[];
   lookedUp?: boolean;
   existingSource?: string;
+  existingSubtitles?: {
+    source: string;
+    language: string;
+    file: string;
+    hash: string;
+    streamIndex?: number;
+    title?: string;
+    codec?: string;
+  };
+  embeddedSubtitleReportFile?: string;
   partialResult?: PipelineResult;
   result?: PipelineResult;
 }

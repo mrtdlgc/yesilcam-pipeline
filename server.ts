@@ -50,10 +50,11 @@ import {
 } from './scripts/4_chunk_srt.js';
 import { parseSrt, segmentsToSrt } from './scripts/lib/srt.js';
 import { formatSubtitleDocument } from './scripts/lib/subtitle-style.js';
-import { publicCatalog, selection } from './scripts/providers/catalog.js';
+import { publicCatalog } from './scripts/providers/catalog.js';
 import { applyStage, createStages, stopStages } from './scripts/lib/progress.js';
 import { audioReview, audioReviewFile } from './scripts/lib/audio-review.js';
 import { prepareReviewWaveform } from './scripts/lib/review-waveform.js';
+import { assertPipelineProviders } from './scripts/lib/pipeline-readiness.js';
 import {
   migratePreparedAudio,
   originalAudioSettings,
@@ -555,7 +556,7 @@ router.delete('/api/connections/:name', async (req, res) => {
   res.json({ success: true });
 });
 
-async function jobInput(body: Record<string, any> = {}) {
+async function jobInput(body: Record<string, any> = {}, deferProviders = false) {
   const title = typeof body.title === 'string' ? body.title.trim() : '';
   if (title.length > 200) fail(400, 'Title is too long');
   const sourceLanguage = body.sourceLanguage || config.DEFAULT_LANGUAGE;
@@ -620,24 +621,7 @@ async function jobInput(body: Record<string, any> = {}) {
         FILTER_HALLUCINATIONS: false,
       });
     validateSettings(settings);
-    if (settings.TRANSLATION_ENABLED) {
-      const status = await codexStatus({ settings });
-      if (!status.available) fail(400, status.message);
-    }
-    const { provider, model } = selection(settings);
-    if (provider.id === 'local' && !config.LOCAL_WHISPER_ENABLED)
-      fail(400, 'Local Whisper is not installed in this cloud image; choose a cloud provider');
-    if (provider.id !== 'local' && model.perMinute === null)
-      fail(400, 'Enter a quoted price per minute for this model');
-    if (provider.id === 'compatible' && !(await credential('TRANSCRIPTION_API_URL')))
-      fail(400, 'Save a custom transcription URL in Connections');
-    if (
-      provider.key &&
-      !(await credential(provider.key)) &&
-      provider.id !== 'compatible' &&
-      !settings.PAUSE_BEFORE_TRANSCRIPTION
-    )
-      fail(400, `${provider.name} needs a key in Connections`);
+    if (!deferProviders) await assertPipelineProviders(settings);
   } catch (error) {
     fail(400, error.message);
   }
@@ -661,7 +645,7 @@ router.post('/api/upload-audio', async (req, res) => {
   const abort = () => controller.abort();
   req.once('aborted', abort);
   try {
-    const data = await jobInput(req.query);
+    const data = await jobInput(req.query, true);
     assertQueueCapacity(await store.read());
     const declared =
       req.headers['content-length'] === undefined ? null : Number(req.headers['content-length']);
@@ -1413,8 +1397,8 @@ async function scanMovies(manual = false) {
       ...initial.jobs.map((job) => job.sourceKey),
     ]);
     const newCandidates = candidates.filter((item) => !known.has(item.fingerprint));
-    // No expensive preparation or futile failed jobs when a cloud key/login is missing.
-    const defaults = newCandidates.length ? await jobInput({}) : null;
+    // Inspect embedded tracks before requiring providers; the pipeline checks before audio work.
+    const defaults = newCandidates.length ? await jobInput({}, true) : null;
     await store.update((state) => {
       if (
         stopping ||

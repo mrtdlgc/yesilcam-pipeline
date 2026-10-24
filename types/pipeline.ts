@@ -158,6 +158,15 @@ export interface QueueState {
 }
 
 export interface PipelineResult {
+  existingSubtitleFile?: string;
+  embeddedSubtitleReportFile?: string;
+  subtitleOrigin?: {
+    source: string;
+    language: string;
+    streamIndex?: number;
+    title?: string;
+    codec?: string;
+  };
   speakerFile?: string;
   editorialSourceFile?: string;
   reviewSourceFile?: string;
