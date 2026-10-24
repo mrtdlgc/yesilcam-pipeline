@@ -135,6 +135,35 @@ test('strict range coverage rejects missing, repeated, reordered, invented and p
   assert.throws(() => validate(plan(), { ...data, sourceHash: 'changed' }), /does not match/);
 });
 
+test('natural pauses and long ASR intervals are review warnings without discarding completed translation', () => {
+  const input = '1\n00:00:01,000 --> 00:00:12,000\nNo, we have not.\n';
+  const segment = {
+    start: 1,
+    end: 12,
+    text: 'No, we have not.',
+    speaker: 'A',
+    speakerScope: 'movie',
+    _timing: 'native_word',
+    words: [
+      { start: 1, end: 1.4, word: 'No,' },
+      { start: 2.8, end: 3, word: 'we' },
+      { start: 3.1, end: 3.4, word: 'have' },
+      { start: 3.5, end: 12, word: 'not.' },
+    ],
+  };
+  const evidence = editorialSource(input, [segment]);
+  const candidate = JSON.stringify({ version: 1, cues: [dialogue(1, 4, 'No, we have not.')] });
+  const result = validateEditorialTranslation(input, candidate, evidence);
+  assert.equal(result.editorial.coveredAnchors, 4);
+  assert.equal(result.cues[0].end, 12, 'retain native timing instead of inventing word alignment');
+  assert.equal(result.cues[0].text, 'No, we have not.');
+  assert.ok(result.editorial.cues[0].warnings.includes('pause_within_cue_check_timing'));
+  assert.ok(result.editorial.cues[0].warnings.includes('long_cue_check_source_timing_and_split'));
+  assert.match(result.reviewSource, /No, we have not/);
+  const missing = JSON.stringify({ version: 1, cues: [dialogue(1, 3, 'No, we have')] });
+  assert.throws(() => validateEditorialTranslation(input, missing, evidence), /untranslated/);
+});
+
 test('speaker turns, singing transitions and unscoped voices cannot be silently combined', () => {
   const voices = plan();
   voices.cues[0].parts[0].to = 4;

@@ -147,7 +147,13 @@ test('editorial CLI output publishes mapped review files and resumes without ano
   const receipt = JSON.parse(await fs.readFile(receiptFile, 'utf8'));
   await fs.writeFile(
     receiptFile,
-    JSON.stringify({ ...receipt, completed: false, status: 'running', turnCompleted: true }),
+    JSON.stringify({
+      ...receipt,
+      completed: false,
+      status: 'failed',
+      failurePhase: 'validation',
+      turnCompleted: true,
+    }),
   );
   await fs.rm(result.reviewSourceFile);
   await translateWithCodex(f.input, f.output, editorialContext, null, f.options);
@@ -256,6 +262,18 @@ for (const mode of ['incomplete', 'retimed', 'quota', 'nonzero']) {
     );
     await assert.rejects(fs.access(f.output));
     assert.equal(await fs.readFile(path.join(f.workDir, 'calls.txt'), 'utf8'), 'exec\n');
+    if (mode === 'retimed' || mode === 'nonzero') {
+      const receipt = JSON.parse(
+        await fs.readFile(path.join(f.workDir, 'codex-receipt.json'), 'utf8'),
+      );
+      assert.equal(receipt.failurePhase, mode === 'retimed' ? 'validation' : 'execution');
+      await assert.rejects(translateWithCodex(f.input, f.output, context, null, f.options));
+      await assert.rejects(fs.access(f.output));
+      assert.equal(
+        await fs.readFile(path.join(f.workDir, 'calls.txt'), 'utf8'),
+        mode === 'retimed' ? 'exec\n' : 'exec\nexec\n',
+      );
+    }
   });
 }
 test('cancellation kills the CLI and leaves source intact without output', async () => {

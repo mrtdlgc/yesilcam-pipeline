@@ -274,7 +274,7 @@ export function validateEditorialTranslation(
         throw new Error('Editorial part mixes singing and dialogue evidence');
       for (let j = 1; j < anchors.length; j++) {
         if (anchors[j].start - anchors[j - 1].end > 1.2)
-          throw new Error('Editorial cue crosses a long silence');
+          warnings.push('pause_within_cue_check_timing');
       }
       next = part.to + 1;
       partAnchors.push(anchors);
@@ -305,8 +305,11 @@ export function validateEditorialTranslation(
     const anchors = partAnchors.flat();
     const start = Math.min(...anchors.map((a) => a.start)),
       end = Math.max(...anchors.map((a) => a.end));
-    if (end - start > 7.001 && anchors.length > 1)
-      throw new Error('Editorial cue exceeds seven seconds; split it at a source anchor');
+    // Timing quality needs listening/editing, not another whole-film translation.
+    // Retain native bounds: blindly splitting target words or clipping a long ASR
+    // anchor would invent alignment and can lose dialogue. Coverage/voice errors
+    // above remain publication blockers.
+    if (end - start > 7.001) warnings.push('long_cue_check_source_timing_and_split');
     if (item.kind === 'uncertain') warnings.push('delivery_uncertain_listen');
     if (item.kind === 'lyric' && !anchors.every((a) => a.singing))
       warnings.push('singing_not_verified_listen');

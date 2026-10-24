@@ -35,6 +35,7 @@ export interface CodexReceipt {
   signature: string;
   completed: boolean;
   status: 'running' | 'failed' | 'complete';
+  failurePhase?: 'execution' | 'validation';
   model: string;
   cliVersion?: string | null;
   turnFailed?: boolean;

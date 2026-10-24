@@ -292,6 +292,13 @@ downloads and existing human corrections remain separate. Existing manifests ret
 and audio-event request identity. Completed Codex receipts remain reusable across prompt updates;
 applying new instructions to completed work requires a new translation job.
 
+Pauses within a phrase and overlong source intervals produce review warnings instead of rejecting
+the whole film. Native timing is retained for listening and correction; target words are never split
+mechanically or clipped to force a duration. Missing content and speaker-boundary violations still
+block publication. A completed model result rejected by local validation is retained and can be
+revalidated after a validator fix, without another Codex request. Failed model execution is tracked
+separately and is not treated as a locally rejected success.
+
 Results appear in the job queue with cancellation and explicit retry. These checks establish
 structural integrity, not linguistic accuracy or Netflix delivery certification. Review a real film
 before release; the fixture suite does not evaluate live model translation quality. Partial/failed

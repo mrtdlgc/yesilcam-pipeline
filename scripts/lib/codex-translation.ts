@@ -266,12 +266,13 @@ export async function translateWithCodex(
     !evidence && [1, 2, 3, 4].some((version) => receipt?.signature === signatureFor(version));
   if (receipt && receipt.signature !== signature && !matchingLegacy)
     throw new Error('Translation source, language or model changed; start a new job');
-  // The completion event and result can survive a stop just before publication.
+  // A finished model turn may survive a stop or a local validation failure.
+  // Revalidate its saved output before considering another subscription request.
   if (
     !receipt?.completed &&
     receipt?.turnCompleted &&
     !receipt.turnFailed &&
-    receipt.status !== 'failed'
+    (receipt.status !== 'failed' || receipt.failurePhase === 'validation')
   ) {
     try {
       const stat = await fs.stat(candidateFile);
@@ -385,6 +386,7 @@ export async function translateWithCodex(
     } catch (error) {
       await eventWrites;
       receipt.status = 'failed';
+      receipt.failurePhase = 'execution';
       await writeJson(receiptFile, receipt);
       checkAbort(options.signal);
       // Do not publish provider stderr, reasoning, prompts or credentials in job logs.
@@ -409,6 +411,7 @@ export async function translateWithCodex(
       validate(candidate);
     } catch (error) {
       receipt.status = 'failed';
+      receipt.failurePhase = 'validation';
       await writeJson(receiptFile, receipt);
       throw error;
     }
