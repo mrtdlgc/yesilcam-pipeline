@@ -441,6 +441,7 @@ test(
       );
       assert.equal((await request('/api/reviews/queued')).status, 401);
       assert.equal((await request('/api/reviews/queued/subtitles/en.srt')).status, 401);
+      assert.equal((await request('/api/reviews/queued/waveform', {})).status, 401);
       const login = await request('/api/auth/login', { password: 'review-fixture-password' });
       assert.equal(login.status, 200);
       cookie = login.headers.get('set-cookie')!.split(';')[0];
@@ -473,6 +474,15 @@ test(
       });
       assert.equal(media.status, 206);
       assert.equal((await media.arrayBuffer()).byteLength, 32);
+      assert.equal(
+        (await request('/api/reviews/queued/waveform', {}, { 'X-Yesilcam-Request': '' })).status,
+        403,
+      );
+      const waveform = await request('/api/reviews/queued/waveform', {});
+      assert.equal(waveform.status, 200);
+      const energy = await waveform.json();
+      assert.equal(energy.version, 1);
+      assert.equal(Buffer.from(energy.peaks, 'base64').length, Math.ceil(document.duration * 100));
       assert.match(await (await request(job.result.currentSubtitleFile)).text(), /Uncle!/);
       const edit = {
         revision: 0,

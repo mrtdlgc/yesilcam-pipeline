@@ -171,8 +171,17 @@ deployment.
 Press **E** during a line, edit its translation and use **Ctrl/⌘+Enter** to save and continue.
 Adjust a cue with **Start here**, **End here** and 0.1-second nudges; check the changed preview and
 both downloaded language tracks. Apply an offset to a short range and confirm neighboring cues stay
-unchanged. Add a missing line, exclude an unwanted one, and restore a generated cue. Downloads
+unchanged. Use **Add cue / A** to insert a missing line, **Remove cue** to remove an unwanted one,
+then **Undo removal** or **Removed cues → Restore removed cue**. Reload with a removed cue and an
+unfinished addition; both must remain recoverable. Restore a generated cue separately. Downloads
 should always be available without marking untouched cues or approving the film.
+
+Check the waveform at a spoken onset, a silent gap, a delayed audio start and near the film's end.
+Click to seek and select cue bands. Drag Start/End, or focus a handle and nudge with arrow keys;
+verify both subtitle exports and the video preview use the saved timing. Escape/pointer cancellation
+must leave the previous timing intact. Check zoom, amplitude, panning/follow and a phone viewport.
+Reload and restart: the waveform cache should be reused without re-decoding or inference. Simulate a
+waveform failure: the editor must remain usable and **Retry waveform** must recover independently.
 
 Edit in two tabs, simulate a dropped connection, and reload. Unsaved drafts/conflicts must be
 visible; saved text, notes and position should return. Invalid half-typed timestamps must not be

@@ -14,9 +14,19 @@ requirement to mark good cues. Watch and edit only the problematic passages.
   source timestamps; editorial translation builds a new paired timeline from source anchors.
 - **Shift a passage or the whole film** applies an offset to the chosen cue range. Positive offsets
   show subtitles later. Invalid times are rejected; overlaps are flagged without blocking export.
-- **Add missing dialogue** adds one paired cue. **Exclude this cue** omits an unwanted line from
-  both tracks without erasing it. Existing cue IDs are retained; new IDs are unique and exports
-  follow chronological order.
+- **Add cue** or **A** opens a paired cue at the playhead. Enter both texts and choose **Save new
+  cue**. An unfinished addition stays in this browser across closing/reopening the form or
+  reloading. **Remove cue** removes a line from playback and both exports. **Undo removal**, or the
+  **Removed cues** filter and **Restore removed cue**, brings back the edited line. Current cues are
+  shown by default. Existing IDs stay stable; new IDs are unique and exports follow chronological
+  order.
+- The **Audio waveform** shows peaks and energy beneath the video, with subtitle bands and a
+  playhead. Click to seek, or click a band to select its cue. Drag **Start / End** to sync both
+  tracks; the timing saves on release. A focused handle supports ←/→ for 0.01 seconds, Shift for 0.1
+  seconds. Choose a shorter zoom window for fine adjustments, increase Height for quiet audio, and
+  use the slider/arrows to browse. **At playhead** resumes following playback. Cancelling a drag
+  leaves timing unchanged. Text timing fields remain available while the waveform loads or if it
+  fails.
 - Switch the playback language, replay/loop a line, search either language, or filter warnings,
   edits and notes. **Mark for later** and notes are optional reminders, not approval controls.
 - **Download SRT/ASS** in the player or on the job card serves the current saved corrections.
@@ -25,15 +35,16 @@ requirement to mark good cues. Watch and edit only the problematic passages.
 
 Editorial screenings pair regrouped source words with their translation. The original source SRT
 remains downloadable from Job Details. Background lyrics omitted by the editorial pass still appear
-as excluded cues; clear **Exclude this cue** to restore one. Story lyrics are italicized. Warnings
-identify tentative song matches, proposed transcription repairs, uncertain delivery and unresolved
-timing problems. Filter warnings to find these passages; every cue does not require approval.
-Automatic omissions form part of the generated baseline, so restoring a cue to its original state
-also restores its original omission decision.
+in **Removed cues**; choose **Restore removed cue** to restore one. Story lyrics are italicized.
+Warnings identify tentative song matches, proposed transcription repairs, uncertain delivery and
+unresolved timing problems. Filter warnings to find these passages; every cue does not require
+approval. Automatic omissions form part of the generated baseline, so restoring a cue to its
+original state also restores its original omission decision.
 
 Changing source dialogue does not run translation again: adjust the adjacent translation when its
 meaning needs changing. No edit, screening retry, media playback or subtitle export invokes ASR or
-Codex. Native subtitle preview updates as you edit; downloads wait for pending saves to finish.
+Codex. Waveform generation also runs locally without provider requests. Native subtitle preview
+updates as you edit; downloads wait for pending saves to finish.
 
 Corrections, notes and playback position live on the persistent server volume. A revision check
 prevents another tab from silently overwriting changes. Unsaved edits also have a browser draft;
@@ -51,6 +62,14 @@ CPU threads; audio is copied when compatible or encoded to AAC/Opus. Audio-only 
 playback. The configured audio stream is used consistently. This work has its own **Prepare
 screening** bar.
 
+Opening the correction editor automatically prepares a compact waveform from the screening's
+selected audio track. One low-priority audio decoder runs at a time, with a three-minute deadline;
+it streams 8 kHz PCM into 10 ms peak/RMS bins without retaining a movie-sized audio buffer or
+decoding video. Delays and silence remain on the playback timeline. The waveform is cached alongside
+the screening and reused across tabs/restarts; changed media invalidates it. A failure leaves the
+editor usable and exposes **Retry waveform**. A browser-only local film needs server screening media
+before a waveform is available.
+
 Media preparation respects the input size/duration, temporary reservation, free-space and media
 timeout limits. Persistent screening copies consume additional disk and are not removed by temp
 cleanup. Screening runs outside the queue slot. A failed screening retains source media and does not
@@ -64,6 +83,7 @@ only provide audio review when that is the retained source.
 | `data/subtitle-reviews/JOB_ID.json`                            | Current bilingual cues, generated baseline, notes, revision and playback position |
 | `data/subtitle-review-media/JOB_ID.json`                       | Completed-media identity and reuse metadata                                       |
 | `review-sessions/JOB_ID/screening.mp4` or `.webm`              | Durable screening media                                                           |
+| `review-sessions/JOB_ID/waveform.json`                         | Cached audio peaks/energy and screening media identity                            |
 | `output/subtitles/`                                            | Unchanged generated subtitle files                                                |
 | `output/reviews/JOB_ID-editorial-source.json`                  | Native source anchors, scoped voices, audio events and available scene cuts       |
 | `output/reviews/*-paired-source.srt` and `*-paired-target.srt` | Matching editorial review tracks, including omitted lyrics                        |

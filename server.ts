@@ -53,6 +53,7 @@ import { formatSubtitleDocument } from './scripts/lib/subtitle-style.js';
 import { publicCatalog, selection } from './scripts/providers/catalog.js';
 import { applyStage, createStages, stopStages } from './scripts/lib/progress.js';
 import { audioReview, audioReviewFile } from './scripts/lib/audio-review.js';
+import { prepareReviewWaveform } from './scripts/lib/review-waveform.js';
 import {
   migratePreparedAudio,
   originalAudioSettings,
@@ -1093,6 +1094,9 @@ router.post('/api/reviews/:id', async (req, res) => {
 router.post('/api/reviews/:id/position', async (req, res) => {
   await saveReviewPosition(jobId(req.params.id), req.body?.position);
   res.json({ saved: true });
+});
+router.post('/api/reviews/:id/waveform', async (req, res) => {
+  res.json(await prepareReviewWaveform(jobId(req.params.id)));
 });
 router.get('/api/reviews/:id/subtitles/:file', async (req, res) => {
   const match = String(req.params.file).match(/^([a-z]{2,3})\.(srt|ass|vtt|json)$/);

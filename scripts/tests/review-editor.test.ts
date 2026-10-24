@@ -18,6 +18,7 @@ test(
       reviewView,
       editSubtitleReview,
       saveReviewPosition,
+      reviewExport,
     } = await import('../lib/subtitle-review.js');
     const source =
       '1\n00:00:00,100 --> 00:00:01,000\nAnacığım!\n\n2\n00:00:02,000 --> 00:00:03,000\nGeliyorum.\n';
@@ -266,6 +267,57 @@ test(
       await until(async () => (await readSubtitleReview('editor')).cues.length === 3);
       await until(() => element('selectedTitle').textContent === 'Cue 3');
       assert.equal(element('targetText').value, 'Wait!');
+      element('targetText').value = 'Wait for me!';
+      element('targetText').oninput!();
+      element('removeCue').click();
+      await until(async () => (await readSubtitleReview('editor')).cues[2].omitted);
+      await until(() => !element('cueUndo').hidden);
+      document = await readSubtitleReview('editor');
+      assert.equal(
+        document.cues[2].texts.en,
+        'Wait for me!',
+        'removing flushes unfinished edits first',
+      );
+      assert.doesNotMatch(reviewExport(document, 'en', 'srt'), /Wait/);
+      assert.doesNotMatch(reviewExport(document, 'tr', 'srt'), /Bekle/);
+      assert.equal(element('film').captions.cues.length, 2);
+      assert.equal(element('cueCount').textContent, '2 cues');
+      element('filter').value = 'removed';
+      element('filter').onchange!();
+      assert.match(element('listSummary').textContent, /^1 shown/);
+      element('undoRemoveCue').click();
+      await until(async () => !(await readSubtitleReview('editor')).cues[2].omitted);
+      await until(() => element('cueUndo').hidden);
+      assert.equal(
+        element('targetText').value,
+        'Wait for me!',
+        'undo restores the correction, not the original',
+      );
+      assert.equal(element('filter').value, 'active');
+      assert.equal(element('restoreCue').disabled, true, 'added cues have no generated original');
+      element('removeCue').click();
+      await until(async () => (await readSubtitleReview('editor')).cues[2].omitted);
+      await until(() => !element('restoreRemovedCue').hidden);
+      element('restoreRemovedCue').click();
+      await until(async () => !(await readSubtitleReview('editor')).cues[2].omitted);
+      await until(() => element('restoreRemovedCue').hidden);
+      element('film').currentTime = 3.99;
+      element('openAddCue').click();
+      assert.equal(element('addCuePanel').hidden, false);
+      assert.equal(element('addStart').value, '00:00:03.900');
+      assert.equal(element('addEnd').value, '00:00:04.000');
+      element('addSource').value = 'Missing line';
+      element('addSource').oninput!();
+      assert.ok(
+        [...stored.values()].some((value) => JSON.parse(value).add?.source === 'Missing line'),
+      );
+      element('cancelAddCue').click();
+      element('openAddCue').click();
+      assert.equal(
+        element('addSource').value,
+        'Missing line',
+        'closing and reopening preserves the unfinished cue',
+      );
     } finally {
       timers.forEach(clearTimeout);
       for (const [name, descriptor] of originals) {

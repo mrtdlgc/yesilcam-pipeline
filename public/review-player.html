@@ -80,6 +80,89 @@
               <select id="subtitleLanguage" aria-label="Subtitle language"></select>
             </label>
           </div>
+          <section
+            id="waveformPanel"
+            class="waveform-panel"
+            aria-label="Audio waveform and cue timing"
+            hidden
+          >
+            <div class="waveform-toolbar">
+              <h2>Audio waveform</h2>
+              <label class="inline"
+                >Zoom
+                <select id="waveformZoom" aria-label="Waveform visible duration">
+                  <option value="4">4 seconds</option>
+                  <option value="8">8 seconds</option>
+                  <option value="12" selected>12 seconds</option>
+                  <option value="20">20 seconds</option>
+                  <option value="40">40 seconds</option>
+                  <option value="80">80 seconds</option>
+                </select>
+              </label>
+              <label class="inline"
+                >Height
+                <select id="waveformGain" aria-label="Waveform amplitude">
+                  <option value="1">1×</option>
+                  <option value="2" selected>2×</option>
+                  <option value="4">4×</option>
+                  <option value="8">8×</option>
+                </select>
+              </label>
+              <label class="inline"
+                ><input type="checkbox" id="waveformFollow" checked /> Follow playback</label
+              >
+            </div>
+            <p id="waveformStatus" class="fine-print" role="status">
+              Preparing the audio waveform… You can keep editing.
+            </p>
+            <button id="waveformRetry" class="secondary" hidden>Retry waveform</button>
+            <div id="waveformViewport" class="waveform-viewport">
+              <canvas
+                id="waveformCanvas"
+                height="168"
+                aria-label="Audio energy and subtitle cue regions"
+              ></canvas>
+              <div id="waveformPlayhead" class="waveform-playhead" aria-hidden="true"></div>
+              <button
+                id="waveformStart"
+                class="waveform-handle"
+                role="slider"
+                aria-label="Selected cue start"
+                aria-orientation="horizontal"
+                hidden
+              >
+                <span>Start</span>
+              </button>
+              <button
+                id="waveformEnd"
+                class="waveform-handle end"
+                role="slider"
+                aria-label="Selected cue end"
+                aria-orientation="horizontal"
+                hidden
+              >
+                <span>End</span>
+              </button>
+            </div>
+            <div class="waveform-navigation">
+              <button id="waveformBack" class="secondary" aria-label="Earlier waveform">←</button>
+              <input
+                id="waveformPosition"
+                type="range"
+                min="0"
+                max="0"
+                step="0.01"
+                value="0"
+                aria-label="Waveform position in the film"
+              />
+              <button id="waveformForward" class="secondary" aria-label="Later waveform">→</button>
+              <button id="waveformCenter" class="secondary">At playhead</button>
+            </div>
+            <p class="fine-print">
+              Click to seek; click a cue band to select it. Drag Start / End to sync both tracks.
+              Focus a handle and use ← / → for 0.01s, Shift for 0.1s.
+            </p>
+          </section>
           <div class="tools">
             <form id="timeForm" class="inline">
               <label for="jumpTime">Go to time</label>
@@ -96,6 +179,7 @@
               >
             </form>
             <button id="markCurrent" class="secondary">Note current cue <kbd>N</kbd></button>
+            <button id="openAddCue" hidden>Add cue · A</button>
             <label id="localMediaControl" class="inline" hidden
               >Open matching film
               <input id="localMedia" type="file" accept="video/*,audio/*" />
@@ -116,6 +200,17 @@
             <p id="selectedMeta" class="muted"></p>
             <blockquote id="selectedText" lang="tr"></blockquote>
             <div id="correctionEditor" hidden>
+              <div class="cue-actions actions compact">
+                <button id="removeCue" class="secondary danger">Remove cue</button>
+                <button id="restoreRemovedCue" class="secondary" hidden>Restore removed cue</button>
+                <span id="removedCueNotice" class="muted" hidden
+                  >Removed from playback and both subtitle exports.</span
+                >
+              </div>
+              <div id="cueUndo" class="cue-undo" hidden>
+                <span id="cueUndoMessage" role="status"></span>
+                <button id="undoRemoveCue" class="secondary">Undo removal</button>
+              </div>
               <div class="text-editors">
                 <label
                   ><span id="sourceTextLabel">Original language</span>
@@ -144,9 +239,6 @@
                 dialogue. Timing edits move both tracks together. Changes save automatically.
               </p>
               <div class="note-controls">
-                <label class="inline"
-                  ><input id="omitCue" type="checkbox" /> Exclude this cue from exports</label
-                >
                 <button id="restoreCue" class="secondary">Restore generated cue</button>
               </div>
               <details class="original-cue">
@@ -172,8 +264,12 @@
                   the selected range changes.
                 </p>
               </details>
-              <details id="addCuePanel" class="passage-tools">
-                <summary>Add missing dialogue</summary>
+              <section id="addCuePanel" class="add-cue-panel" aria-labelledby="addCueTitle" hidden>
+                <h2 id="addCueTitle">Add cue</h2>
+                <p class="muted">
+                  Fill in the missing dialogue and its translation. The new cue is inserted in time
+                  order.
+                </p>
                 <div class="timing-editors">
                   <label>Start <input id="addStart" type="text" inputmode="decimal" /></label>
                   <label>End <input id="addEnd" type="text" inputmode="decimal" /></label>
@@ -189,8 +285,14 @@
                     ><textarea id="addTarget" rows="2"></textarea>
                   </label>
                 </div>
-                <button id="addCue">Add subtitle</button>
-              </details>
+                <div class="actions compact">
+                  <button id="addCue">Save new cue</button>
+                  <button id="cancelAddCue" class="secondary">Close</button>
+                </div>
+                <p id="addCueStatus" class="fine-print" role="status">
+                  Your unfinished cue stays in this browser until you save it.
+                </p>
+              </section>
               <div id="originalDownloads" class="actions compact"></div>
             </div>
             <div id="selectedFlags" class="flags"></div>

@@ -1,3 +1,5 @@
+import { startWaveform } from './review-waveform.js';
+
 interface Cue {
   id: string;
   start: number;
@@ -70,6 +72,9 @@ export async function startEditor(id: string) {
   let positionAt = 0,
     localUrl = '';
   let captionTrack: TextTrack;
+  let waveform: ReturnType<typeof startWaveform>;
+  let removedCueId = '';
+  let newCueDraft: { start: string; end: string; source: string; target: string } | null = null;
   const rows = new Map<string, HTMLButtonElement>();
   const status = (message: string, error = false) => {
     $('status').textContent = message;
@@ -106,13 +111,14 @@ export async function startEditor(id: string) {
   }
   function persistDraft() {
     try {
-      if (pending.size || invalidTiming.size)
+      if (pending.size || invalidTiming.size || newCueDraft)
         localStorage.setItem(
           draftKey,
           JSON.stringify({
             revision: document.revision,
             edits: [...pending.values()].map((entry) => entry.edit),
             timings: [...invalidTiming],
+            add: newCueDraft,
           }),
         );
       else localStorage.removeItem(draftKey);
@@ -259,6 +265,7 @@ export async function startEditor(id: string) {
     }
     for (const cue of existing.values()) captionTrack.removeCue(cue);
     captionTrack.mode = input('showSubtitles').checked ? 'showing' : 'hidden';
+    waveform?.refresh();
   }
   function renderList() {
     const query = input('search').value.trim().toLocaleLowerCase('tr');
@@ -275,6 +282,8 @@ export async function startEditor(id: string) {
       if (filter === 'warnings' && !cue.warnings.length) continue;
       if (filter === 'notes' && !cue.flagged && !cue.note) continue;
       if (filter === 'changed' && !cue.changed) continue;
+      if (filter === 'active' && cue.omitted) continue;
+      if (filter === 'removed' && !cue.omitted) continue;
       const row = node('button', '', 'cue-row');
       row.type = 'button';
       row.dataset.cueId = cue.id;
@@ -290,7 +299,7 @@ export async function startEditor(id: string) {
         node('span', cue.texts[language], 'cue-text'),
       );
       const flags = [
-        cue.omitted ? 'Excluded' : '',
+        cue.omitted ? 'Removed' : '',
         cue.changed ? 'Edited' : '',
         cue.flagged ? 'For later' : '',
         cue.warnings.length ? `${cue.warnings.length} checks` : '',
@@ -311,12 +320,13 @@ export async function startEditor(id: string) {
     }
     if (!rows.size) fragment.append(node('p', 'No cues match this view.', 'empty-state'));
     $('cueList').replaceChildren(fragment);
-    $('cueCount').textContent = `${document.cues.filter((cue) => !cue.omitted).length} cues`;
+    $('cueCount').textContent = `${cues().filter((cue) => !cue.omitted).length} cues`;
     $('listSummary').textContent =
-      `${rows.size} shown · ${cues().filter((cue) => cue.flagged).length} marked for later`;
+      `${rows.size} shown · ${cues().filter((cue) => cue.omitted).length} removed · ${cues().filter((cue) => cue.flagged).length} marked for later`;
   }
-  function select(cueId: string) {
+  function select(cueId: string, focusWaveform = true) {
     if (!document.cues.some((cue) => cue.id === cueId)) return;
+    const changed = selected !== cueId;
     rows.get(selected)?.classList.remove('selected');
     selected = cueId;
     rows.get(selected)?.classList.add('selected');
@@ -331,7 +341,15 @@ export async function startEditor(id: string) {
     input('cueEnd').value = invalidTiming.get(cue.id)?.end ?? clock(cue.end);
     area('cueNote').value = cue.note;
     input('needsFix').checked = cue.flagged;
-    input('omitCue').checked = cue.omitted;
+    $('removeCue').hidden = cue.omitted;
+    $('restoreRemovedCue').hidden = $('removedCueNotice').hidden = !cue.omitted;
+    $<HTMLButtonElement>('removeCue').disabled =
+      commandBusy || cues().filter((cue) => !cue.omitted).length <= 1;
+    $('removeCue').title =
+      cues().filter((cue) => !cue.omitted).length <= 1
+        ? 'Keep at least one cue. Add another before removing this one.'
+        : 'Remove from both tracks; you can undo this or restore it from Removed cues.';
+    $<HTMLButtonElement>('restoreRemovedCue').disabled = commandBusy;
     $('selectedFlags').replaceChildren(
       ...cue.warnings.map((warning) => node('span', warning.replaceAll('_', ' '))),
     );
@@ -341,10 +359,12 @@ export async function startEditor(id: string) {
           .map(([lang, text]) => `${lang.toUpperCase()}: ${text}`)
           .join('\n\n')}`
       : 'Added during review.';
-    $<HTMLButtonElement>('restoreCue').disabled = !original;
+    $<HTMLButtonElement>('restoreCue').disabled = commandBusy || !original;
     input('shiftFrom').value = cue.id;
     input('shiftTo').value = cue.id;
     loading = false;
+    if (changed && focusWaveform) waveform?.focus(cue.start);
+    waveform?.refresh();
   }
   function seek(time: number) {
     if (!video.src) return;
@@ -367,9 +387,14 @@ export async function startEditor(id: string) {
   function adjacent(direction: number) {
     const ordered = cues(),
       index = ordered.findIndex((cue) => cue.id === selected);
-    const cue = ordered[Math.max(0, Math.min(ordered.length - 1, index + direction))];
-    select(cue.id);
-    seek(cue.start - 1);
+    const filter = $<HTMLSelectElement>('filter').value;
+    for (let next = index + direction; next >= 0 && next < ordered.length; next += direction) {
+      const cue = ordered[next];
+      if (filter === 'removed' ? !cue.omitted : filter !== 'all' && cue.omitted) continue;
+      select(cue.id);
+      seek(cue.start - 1);
+      break;
+    }
   }
   function editCurrent() {
     video.pause();
@@ -377,7 +402,7 @@ export async function startEditor(id: string) {
       (cue) => !cue.omitted && cue.start <= video.currentTime && cue.end > video.currentTime,
     );
     if (!cue) {
-      status('No cue here. Use Add missing dialogue to insert one.');
+      status('No cue here. Choose Add cue or press A to insert one.');
       return;
     }
     select(cue.id);
@@ -389,11 +414,14 @@ export async function startEditor(id: string) {
     const controls = [
       ...window.document.querySelectorAll<
         HTMLInputElement | HTMLButtonElement | HTMLTextAreaElement
-      >('#correctionEditor input, #correctionEditor textarea, #correctionEditor button'),
+      >(
+        '#correctionEditor input, #correctionEditor textarea, #correctionEditor button, #openAddCue, #cueNote, #needsFix',
+      ),
     ];
     controls.forEach((control) => {
       control.disabled = true;
     });
+    waveform?.refresh();
     try {
       document = await request(api, { revision: document.revision, ...body });
       persistDraft();
@@ -404,6 +432,14 @@ export async function startEditor(id: string) {
       return true;
     } catch (error) {
       status(error.message, true);
+      saveStatus(`Not saved: ${error.message}`, true);
+      if (error.status === 409) {
+        blocked = true;
+        recovery(
+          'This screening changed in another tab. Load the saved version, then try the action again.',
+          true,
+        );
+      }
       return false;
     } finally {
       commandBusy = false;
@@ -509,7 +545,7 @@ export async function startEditor(id: string) {
   language = document.languages.includes(document.targetLanguage)
     ? document.targetLanguage
     : document.sourceLanguage;
-  selected = document.cues[0].id;
+  selected = (document.cues.find((cue) => !cue.omitted) ?? document.cues[0]).id;
   try {
     const draft = JSON.parse(localStorage.getItem(draftKey) ?? 'null');
     if (draft && Array.isArray(draft.edits)) {
@@ -525,7 +561,20 @@ export async function startEditor(id: string) {
         )
           invalidTiming.set(entry[0], entry[1]);
       }
-      blocked = draft.revision !== document.revision;
+      if (
+        draft.add &&
+        ['start', 'end', 'source', 'target'].every(
+          (key) => typeof draft.add[key] === 'string' && draft.add[key].length <= 8000,
+        )
+      ) {
+        newCueDraft = draft.add;
+        input('addStart').value = draft.add.start;
+        input('addEnd').value = draft.add.end;
+        area('addSource').value = draft.add.source;
+        area('addTarget').value = draft.add.target;
+        $('addCuePanel').hidden = false;
+      }
+      blocked = Boolean(pending.size || invalidTiming.size) && draft.revision !== document.revision;
       if (pending.size || invalidTiming.size)
         recovery(
           blocked
@@ -544,11 +593,21 @@ export async function startEditor(id: string) {
   $('reviewExplanation').textContent =
     'Your corrections and playback position are saved on the server. Generated originals remain available. Speaker labels are tentative voice groups.';
   $('shortcuts').textContent =
-    'Space: play/pause · ←/→: seek · [/]: previous/next cue · R: replay · E: edit current cue · Ctrl/⌘+Enter: save and resume';
+    'Space: play/pause · ←/→: seek · [/]: previous/next cue · R: replay · E: edit current cue · A: add cue · Ctrl/⌘+Enter: save and resume';
   $('markCurrent').textContent = 'Edit current cue · E';
   $('selectedText').hidden = true;
   $('correctionEditor').hidden = false;
   $('languageControl').hidden = false;
+  $('openAddCue').hidden = false;
+  for (const [value, label] of [
+    ['active', 'Current cues'],
+    ['removed', 'Removed cues'],
+  ]) {
+    const option = node('option', label);
+    option.value = value;
+    $('filter').append(option);
+  }
+  $<HTMLSelectElement>('filter').value = 'active';
   $('sourceTextLabel').textContent = `Dialogue (${document.sourceLanguage})`;
   $('targetTextLabel').textContent = `Translation (${document.targetLanguage})`;
   $('addSourceLabel').textContent = `Dialogue (${document.sourceLanguage})`;
@@ -595,6 +654,23 @@ export async function startEditor(id: string) {
   languageChanged();
   select(selected);
   $('workspace').hidden = false;
+  waveform = startWaveform({
+    video,
+    duration: document.duration,
+    load: () => request(new URL(`${api.pathname}/waveform`, api), {}),
+    cues: () => cues().map((cue) => ({ ...cue, text: cue.texts[language] })),
+    selected: () => selected,
+    canEdit: () => !commandBusy && !invalidTiming.has(selected),
+    select: (id) => select(id, false),
+    seek,
+    timing: (cueId, start, end) => {
+      if (commandBusy || cueId !== selected || invalidTiming.has(cueId)) return;
+      input('cueStart').value = clock(start);
+      input('cueEnd').value = clock(end);
+      stage({ id: cueId, start, end });
+      select(cueId, false);
+    },
+  });
   $<HTMLButtonElement>('exportNotes').disabled = false;
   saveStatus(
     pending.size
@@ -657,6 +733,7 @@ export async function startEditor(id: string) {
     } catch (error) {
       persistDraft();
       saveStatus(`Timing not saved: ${error.message}`, true);
+      waveform?.refresh();
     }
   };
   input('cueStart').oninput = changeTiming;
@@ -683,14 +760,42 @@ export async function startEditor(id: string) {
   $('laterCue').onclick = () => nudge(0.1);
   area('cueNote').oninput = () => stage({ id: selected, note: area('cueNote').value });
   input('needsFix').onchange = () => stage({ id: selected, flagged: input('needsFix').checked });
-  input('omitCue').onchange = () => stage({ id: selected, omitted: input('omitCue').checked });
+  async function setRemoved(cueId: string, omitted: boolean) {
+    video.pause();
+    if (!(await command({ edits: [{ id: cueId, omitted }] }))) return;
+    if (omitted) {
+      removedCueId = cueId;
+      $('cueUndoMessage').textContent = `Cue ${cueId} removed from both tracks.`;
+      $('cueUndo').hidden = false;
+    } else {
+      if (removedCueId === cueId) {
+        removedCueId = '';
+        $('cueUndo').hidden = true;
+      }
+      if ($<HTMLSelectElement>('filter').value === 'removed') {
+        $<HTMLSelectElement>('filter').value = 'active';
+        renderList();
+      }
+      select(cueId);
+    }
+  }
+  $('removeCue').onclick = () => {
+    void setRemoved(selected, true);
+  };
+  $('restoreRemovedCue').onclick = () => {
+    void setRemoved(selected, false);
+  };
+  $('undoRemoveCue').onclick = () => {
+    if (removedCueId) void setRemoved(removedCueId, false);
+  };
   $('restoreCue').onclick = () => {
+    const cueId = selected;
     void (async () => {
       if (saving) await saving;
-      pending.delete(selected);
-      invalidTiming.delete(selected);
+      pending.delete(cueId);
+      invalidTiming.delete(cueId);
       persistDraft();
-      await command({ edits: [{ id: selected, reset: true }] });
+      await command({ edits: [{ id: cueId, reset: true }] });
     })();
   };
   $('shiftRemaining').onclick = () => {
@@ -709,10 +814,43 @@ export async function startEditor(id: string) {
       },
     });
   };
-  $('addHere').onclick = () => {
-    input('addStart').value = clock(video.currentTime);
-    input('addEnd').value = clock(Math.min(document.duration, video.currentTime + 2));
+  function saveNewCueDraft() {
+    newCueDraft =
+      area('addSource').value || area('addTarget').value
+        ? {
+            start: input('addStart').value,
+            end: input('addEnd').value,
+            source: area('addSource').value,
+            target: area('addTarget').value,
+          }
+        : null;
+    persistDraft();
+    $('addCueStatus').textContent = storageFailed
+      ? 'Browser backup unavailable. Keep this page open until the new cue is saved.'
+      : 'Your unfinished cue stays in this browser until you save it.';
+  }
+  function addAtPlayback() {
+    const start = Math.max(0, Math.min(document.duration - 0.1, video.currentTime));
+    const next = cues().find((cue) => !cue.omitted && cue.start > start + 0.1);
+    input('addStart').value = clock(start);
+    input('addEnd').value = clock(Math.min(document.duration, start + 2, next?.start ?? Infinity));
+    saveNewCueDraft();
+  }
+  function openAddCue() {
+    if (commandBusy) return;
+    video.pause();
+    if (!newCueDraft) addAtPlayback();
+    $('addCuePanel').hidden = false;
+    area('addSource').focus();
+  }
+  $('openAddCue').onclick = openAddCue;
+  $('cancelAddCue').onclick = () => {
+    $('addCuePanel').hidden = true;
+    $('openAddCue').focus();
   };
+  $('addHere').onclick = addAtPlayback;
+  for (const field of ['addStart', 'addEnd', 'addSource', 'addTarget'])
+    $(field).oninput = saveNewCueDraft;
   $('addCue').onclick = () => {
     try {
       const texts = {
@@ -728,17 +866,28 @@ export async function startEditor(id: string) {
           texts,
         },
       }).then((saved) => {
-        if (!saved) return;
+        if (!saved) {
+          $('addCueStatus').textContent =
+            `New cue not saved. ${$('saveStatus').textContent} Your draft is kept.`;
+          return;
+        }
+        $<HTMLSelectElement>('filter').value = 'active';
+        input('search').value = '';
+        renderList();
         select(
           document.cues.reduce((latest, cue) => (Number(cue.id) > Number(latest.id) ? cue : latest))
             .id,
         );
         area('addSource').value = '';
         area('addTarget').value = '';
-        $<HTMLDetailsElement>('addCuePanel').open = false;
+        newCueDraft = null;
+        persistDraft();
+        $('addCuePanel').hidden = true;
+        area(document.languages.length > 1 ? 'targetText' : 'sourceText').focus();
       });
     } catch (error) {
       status(error.message, true);
+      $('addCueStatus').textContent = error.message;
     }
   };
   $('exportNotes').onclick = exportNotes;
@@ -750,6 +899,7 @@ export async function startEditor(id: string) {
           revision: document.revision,
           edits: [...pending.values()].map((entry) => entry.edit),
           timings: [...invalidTiming],
+          add: newCueDraft,
         },
         null,
         2,
@@ -786,7 +936,7 @@ export async function startEditor(id: string) {
     })().catch((error) => status(error.message, true));
   };
   window.addEventListener('beforeunload', (event) => {
-    if (pending.size || invalidTiming.size || saving || commandBusy) {
+    if (pending.size || invalidTiming.size || newCueDraft || saving || commandBusy) {
       event.preventDefault();
     }
   });
@@ -819,7 +969,7 @@ export async function startEditor(id: string) {
       return;
     const key = event.key.toLowerCase();
     if ((key === ' ' || key.startsWith('arrow')) && target.closest('button, a, video')) return;
-    if (![' ', 'arrowleft', 'arrowright', '[', ']', 'r', 'e'].includes(key)) return;
+    if (![' ', 'arrowleft', 'arrowright', '[', ']', 'r', 'e', 'a'].includes(key)) return;
     event.preventDefault();
     if (key === ' ') video.paused ? void play() : video.pause();
     else if (key === 'arrowleft') seek(video.currentTime - 5);
@@ -827,6 +977,7 @@ export async function startEditor(id: string) {
     else if (key === '[') adjacent(-1);
     else if (key === ']') adjacent(1);
     else if (key === 'r') replay();
+    else if (key === 'a') openAddCue();
     else editCurrent();
   });
 }

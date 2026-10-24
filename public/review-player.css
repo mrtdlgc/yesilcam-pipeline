@@ -471,6 +471,132 @@ summary {
 .cue-row.omitted {
   opacity: 0.55;
 }
+.cue-actions {
+  margin-top: 15px;
+  align-items: center;
+}
+button.danger {
+  color: var(--danger);
+  border-color: #765341;
+}
+.cue-undo {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px;
+  margin-top: 12px;
+  background: #26362c;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.cue-undo button {
+  padding: 6px 9px;
+  font-size: 12px;
+}
+.add-cue-panel {
+  border: 1px solid #897348;
+  background: #141b14;
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 16px;
+}
+.add-cue-panel .text-editors {
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+}
+.waveform-panel {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 12px;
+  background: var(--panel);
+}
+.waveform-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.waveform-toolbar h2 {
+  font-size: 14px;
+  margin-right: auto;
+}
+.waveform-viewport {
+  position: relative;
+  margin: 12px 0 8px;
+  overflow: hidden;
+  border-radius: 4px;
+}
+#waveformCanvas {
+  display: block;
+  width: 100%;
+  height: 168px;
+  cursor: crosshair;
+}
+.waveform-playhead {
+  position: absolute;
+  top: 22px;
+  bottom: 0;
+  width: 2px;
+  background: #f4f6ee;
+  pointer-events: none;
+  box-shadow: 0 0 4px #000;
+}
+.waveform-handle {
+  position: absolute;
+  top: 24px;
+  height: 110px;
+  width: 18px;
+  transform: translateX(-50%);
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 1;
+}
+.waveform-handle::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: var(--gold);
+}
+.waveform-handle span {
+  position: absolute;
+  top: 2px;
+  left: 8px;
+  background: var(--gold);
+  color: var(--bg);
+  padding: 3px 4px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+.waveform-handle.end span {
+  left: auto;
+  right: 8px;
+}
+.waveform-navigation {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.waveform-navigation button,
+#waveformRetry {
+  padding: 6px 9px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.waveform-navigation input {
+  flex: 1;
+  min-width: 30px;
+  width: 100%;
+  padding: 0;
+  accent-color: var(--gold);
+}
 #saveStatus.error {
   color: var(--danger);
 }
