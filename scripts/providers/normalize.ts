@@ -125,7 +125,32 @@ export async function normalize(
       result.words.some((w: any) => !w || typeof (w.word ?? w.text) !== 'string'))
   )
     throw new Error('Provider returned malformed word text');
+  const audioEvents = [
+    ...(result.audioEvents ?? []),
+    ...(result.words ?? []).filter((w: any) => w.type === 'audio_event'),
+  ]
+    .filter(
+      (e: any) =>
+        Number.isFinite(e.start) &&
+        Number.isFinite(e.end) &&
+        e.end >= e.start &&
+        e.start >= 0 &&
+        e.end <= duration &&
+        typeof e.text === 'string',
+    )
+    .map((e: any) => ({
+      start: e.start,
+      end: e.end,
+      text: e.text,
+      ...(['string', 'number'].includes(typeof (e.speaker ?? e.speaker_id))
+        ? {
+            speaker: String(e.speaker ?? e.speaker_id),
+            speakerScope: fullMovie(settings) ? 'movie' : `chunk_${chunk.id}`,
+          }
+        : {}),
+    }));
   const words = result.words
+    ?.filter((w: any) => w.type !== 'audio_event' && w.type !== 'spacing')
     ?.filter((w: any) => typeof (w.word ?? w.text) === 'string' && (w.word ?? w.text).trim())
     .map((w: any) => {
       const id = w.speaker ?? w.speaker_id;
@@ -188,6 +213,7 @@ export async function normalize(
   return {
     text: result.text,
     segments,
+    audioEvents,
     language: result.language,
     _usage: result.usage ?? null,
     _runtime: {

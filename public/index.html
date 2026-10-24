@@ -239,11 +239,23 @@
               <label class="check-row"
                 ><input id="translateWithCodex" type="checkbox" /><span>
                   Translate with local Codex after transcription<small>
-                    Sends the complete subtitles through your ChatGPT subscription. Timing stays
-                    unchanged.
+                    Translates complete exchanges, follows speaker turns and marks uncertain lyrics
+                    for review. Uses your ChatGPT subscription.
                   </small></span
                 ></label
               >
+              <label for="pipelineTranslationMode">Subtitle editing</label>
+              <select id="pipelineTranslationMode">
+                <option value="editorial">Editorial — natural cues and selective lyrics</option>
+                <option value="fixed">Exact timing — preserve every source cue</option>
+              </select>
+              <label for="pipelineSongReferences">Song notes (optional)</label>
+              <textarea
+                id="pipelineSongReferences"
+                maxlength="8000"
+                rows="2"
+                placeholder="Known song titles, performance details or lyric references"
+              ></textarea>
               <details class="advanced" open>
                 <summary>Audio review &amp; timing</summary>
                 <label class="check-row"
@@ -369,9 +381,7 @@
           <div class="page-intro">
             <p class="eyebrow">BEYOND THE LANGUAGE BARRIER</p>
             <h1 id="translations-title">Same story.<br /><em>More voices.</em></h1>
-            <p>
-              Give Codex the whole film. Keep the voices, the jokes, and every original timestamp.
-            </p>
+            <p>Give Codex the whole film. Keep the voices, the jokes, and the meaning.</p>
           </div>
           <section class="panel merge-section">
             <div class="section-header">
@@ -386,8 +396,8 @@
             <form id="codexTranslationForm">
               <label for="translationSource">Complete subtitles from your library</label>
               <p class="field-note">
-                Netflix-inspired layout is applied to translations too. Cue IDs and timestamps stay
-                unchanged; styled ASS and readability reports are included.
+                Choose natural editorial cues or keep every original timestamp. Original subtitles,
+                styled ASS and review reports remain available.
               </p>
               <select id="translationSource">
                 <option value="">Choose an SRT or upload one below</option>
@@ -426,9 +436,27 @@
                 maxlength="100"
                 autocomplete="off"
               />
+              <label for="translationMode">Subtitle editing</label>
+              <select id="translationMode">
+                <option value="fixed">Exact timing — preserve every source cue</option>
+                <option value="editorial">Editorial — natural cues and selective lyrics</option>
+              </select>
               <p class="field-note">
-                One full-film task. The app checks every cue and timestamp before publishing the
-                translated SRT.
+                Library transcripts can reuse timed words and speaker turns. Uploaded SRT files
+                retain their cue-level timing. Editorial mode keeps story lyrics in italics and
+                preserves uncertain passages for review; omitted background lyrics can be restored.
+              </p>
+              <label for="songReferences">Song notes (optional)</label>
+              <textarea
+                id="songReferences"
+                maxlength="8000"
+                rows="3"
+                placeholder="Known song titles, performance details or lyric references"
+              ></textarea>
+              <p class="field-note">
+                One full-film task. Song recognition helps identify possible transcription errors;
+                remembered lyrics are not treated as verified audio. Every source passage is
+                accounted for before publication.
               </p>
               <button id="startCodexTranslation" type="submit" class="btn-primary" disabled>
                 Translate with local Codex

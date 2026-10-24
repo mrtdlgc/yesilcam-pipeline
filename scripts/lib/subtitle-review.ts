@@ -68,6 +68,7 @@ export async function createSubtitleReview(input: {
   mediaMessage?: string;
   speakers?: Record<string, string>;
   warnings?: Record<string, string[]>;
+  omissions?: Record<string, boolean>;
 }) {
   return serialized(key(input.id), async () => {
     const file = await filename(input.id);
@@ -119,7 +120,7 @@ export async function createSubtitleReview(input: {
       warnings: input.warnings?.[cue.id] ?? [],
       note: '',
       flagged: false,
-      omitted: false,
+      omitted: input.omissions?.[cue.id] === true,
     }));
     const document: SubtitleReview = {
       version: 2,

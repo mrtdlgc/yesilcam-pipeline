@@ -211,11 +211,16 @@ export async function prepareSubtitleReview(
     const settings = { ...config, ...job.settings };
     const manifest = await readJson<Manifest | null>(at('temp', job.id, 'manifest.json'), null);
     const source = await fs.readFile(
-      result.subtitleFile ? await outputFile(result.subtitleFile) : job.input!,
+      result.reviewSourceFile
+        ? await outputFile(result.reviewSourceFile)
+        : result.subtitleFile
+          ? await outputFile(result.subtitleFile)
+          : job.input!,
       'utf8',
     );
-    const target =
-      result.englishSubtitleFile && result.englishSubtitleFile !== result.subtitleFile
+    const target = result.reviewTargetFile
+      ? await fs.readFile(await outputFile(result.reviewTargetFile), 'utf8')
+      : result.englishSubtitleFile && result.englishSubtitleFile !== result.subtitleFile
         ? await fs.readFile(await outputFile(result.englishSubtitleFile), 'utf8')
         : undefined;
     const sourceLanguage =
@@ -234,9 +239,25 @@ export async function prepareSubtitleReview(
             scopes.size > 1 ? `${cue.scope} / ${cue.speaker}` : String(cue.speaker);
     }
     const warnings: Record<string, string[]> = {};
-    if (result.reviewFile) {
+    const omissions: Record<string, boolean> = {};
+    if (result.reviewFile && !result.reviewSourceFile) {
       const report = await readJson(await outputFile(result.reviewFile));
       for (const cue of report.segments ?? []) warnings[String(cue.id)] = cue.review ?? [];
+    }
+    if (result.reviewSourceFile || result.reviewTargetFile) {
+      if (!result.reviewSourceFile || !result.reviewTargetFile || !result.translationReviewFile)
+        throw new Error('Editorial review artifacts are incomplete');
+      const report = await readJson(await outputFile(result.translationReviewFile));
+      if (
+        report.editorial?.reviewSourceHash !== subtitleHash(source) ||
+        report.editorial?.reviewTargetHash !== subtitleHash(target!)
+      )
+        throw new Error('Editorial review no longer matches the saved translation');
+      for (const cue of report.editorial.cues) {
+        speakers[cue.id] = cue.speaker;
+        warnings[cue.id] = cue.warnings;
+        omissions[cue.id] = cue.omitted === true;
+      }
     }
     const sourceManifest = sourceJob
       ? await readJson(at('temp', sourceJob.id, 'manifest.json'), null)
@@ -321,6 +342,7 @@ export async function prepareSubtitleReview(
       duration,
       speakers,
       warnings,
+      omissions,
       mediaMessage: media
         ? ''
         : 'This subtitle-only job has no linked film. Choose a local video in the editor to check timing.',

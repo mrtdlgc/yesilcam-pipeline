@@ -10,8 +10,8 @@ requirement to mark good cues. Watch and edit only the problematic passages.
   translation appear together. Edit either text; corrections save automatically to the backend.
   **Ctrl/⌘+Enter** finishes saving and resumes playback.
 - Adjust start/end times, use **Start here** / **End here** at the playback position, or nudge a cue
-  by 0.1 seconds. Timing changes apply to both language tracks. Model translation still preserves
-  the original timestamps; only explicit human corrections change them.
+  by 0.1 seconds. Timing changes apply to both language tracks. Exact-timing translation preserves
+  source timestamps; editorial translation builds a new paired timeline from source anchors.
 - **Shift a passage or the whole film** applies an offset to the chosen cue range. Positive offsets
   show subtitles later. Invalid times are rejected; overlaps are flagged without blocking export.
 - **Add missing dialogue** adds one paired cue. **Exclude this cue** omits an unwanted line from
@@ -22,6 +22,14 @@ requirement to mark good cues. Watch and edit only the problematic passages.
 - **Download SRT/ASS** in the player or on the job card serves the current saved corrections.
   Generated originals remain separate and can be downloaded or restored per cue. Edited text keeps
   the reviewer's line breaks; current layout/readability reports flag lines that need shortening.
+
+Editorial screenings pair regrouped source words with their translation. The original source SRT
+remains downloadable from Job Details. Background lyrics omitted by the editorial pass still appear
+as excluded cues; clear **Exclude this cue** to restore one. Story lyrics are italicized. Warnings
+identify tentative song matches, proposed transcription repairs, uncertain delivery and unresolved
+timing problems. Filter warnings to find these passages; every cue does not require approval.
+Automatic omissions form part of the generated baseline, so restoring a cue to its original state
+also restores its original omission decision.
 
 Changing source dialogue does not run translation again: adjust the adjacent translation when its
 meaning needs changing. No edit, screening retry, media playback or subtitle export invokes ASR or
@@ -51,12 +59,15 @@ retries only this step. Older completed jobs have **Prepare screening**; their o
 still exist, or a YouTube source must remain downloadable. Previously audio-only YouTube jobs can
 only provide audio review when that is the retained source.
 
-| Persistent path                                   | Contents                                                                          |
-| ------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `data/subtitle-reviews/JOB_ID.json`               | Current bilingual cues, generated baseline, notes, revision and playback position |
-| `data/subtitle-review-media/JOB_ID.json`          | Completed-media identity and reuse metadata                                       |
-| `review-sessions/JOB_ID/screening.mp4` or `.webm` | Durable screening media                                                           |
-| `output/subtitles/`                               | Unchanged generated subtitle files                                                |
+| Persistent path                                                | Contents                                                                          |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `data/subtitle-reviews/JOB_ID.json`                            | Current bilingual cues, generated baseline, notes, revision and playback position |
+| `data/subtitle-review-media/JOB_ID.json`                       | Completed-media identity and reuse metadata                                       |
+| `review-sessions/JOB_ID/screening.mp4` or `.webm`              | Durable screening media                                                           |
+| `output/subtitles/`                                            | Unchanged generated subtitle files                                                |
+| `output/reviews/JOB_ID-editorial-source.json`                  | Native source anchors, scoped voices, audio events and available scene cuts       |
+| `output/reviews/*-paired-source.srt` and `*-paired-target.srt` | Matching editorial review tracks, including omitted lyrics                        |
+| `output/reviews/JOB_ID-translation.json`                       | Source coverage, editorial decisions, repairs and paired-track hashes             |
 
 Current exports are generated from one atomically saved review document. Back up that document
 alongside media and the rest of `/data`; copying only `output/subtitles/` does not include human

@@ -154,21 +154,37 @@ test('full-movie multipart uses a file-backed Blob above the chunk cap and cache
     const body = init?.body as FormData;
     assert.equal(body.get('model_id'), 'scribe_v2');
     assert.equal(body.get('diarize'), 'true');
-    assert.equal(body.get('tag_audio_events'), 'false');
+    assert.equal(body.get('tag_audio_events'), 'true');
     const blob = body.get('file') as Blob;
     assert.equal(blob.size, 21 * 1024 * 1024);
     assert.equal(Buffer.from(await blob.slice(0, 4).arrayBuffer()).toString(), 'fLaC');
-    return Response.json(response);
+    return Response.json({
+      ...response,
+      words: [...response.words, { text: '(singing)', start: 0.8, end: 1, type: 'audio_event' }],
+    });
   };
   try {
     const first = await transcribeCloud(chunk, 'tr', null, settings, options);
     assert.equal(first.segments[0].speaker, 'speaker_0');
+    assert.deepEqual(first.audioEvents, [{ start: 0.8, end: 1, text: '(singing)' }]);
+    assert.ok(first.segments.every((s) => !s.text.includes('singing')));
     const receipt = await readJson(path.join(options.rawDir, 'chunk_0.request.json'));
     assert.ok(receipt.result);
     assert.equal(receipt.submissionResponse, null);
     const second = await transcribeCloud(chunk, 'tr', null, settings, options);
     assert.equal(second._runtime.cached, true);
+    assert.deepEqual(second.audioEvents, first.audioEvents);
     assert.equal(calls, 1);
+    await assert.rejects(
+      transcribeCloud(
+        chunk,
+        'tr',
+        null,
+        { ...settings, TRANSCRIPTION_AUDIO_EVENTS: false },
+        options,
+      ),
+      /checkpoint does not match/,
+    );
     await assert.rejects(
       transcribeCloud(
         chunk,

@@ -1,5 +1,5 @@
 import type { CloudContext } from '../../types/providers.js';
-import { scribeDiarization } from '../lib/transcription-mode.js';
+import { scribeDiarization, scribeAudioEvents } from '../lib/transcription-mode.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const bearer = (key: string | undefined) => ({ Authorization: `Bearer ${key}` });
@@ -96,8 +96,15 @@ async function openrouter(ctx: CloudContext) {
   if (ctx.language !== 'auto') data.language = ctx.language;
   if (data.response_format === 'verbose_json')
     data.timestamp_granularities = model.timing === 'word' ? ['segment', 'word'] : ['segment'];
-  if (scribeDiarization(ctx.settings))
-    data.provider = { options: { elevenlabs: { diarize: true, tag_audio_events: false } } };
+  if (scribeDiarization(ctx.settings) || scribeAudioEvents(ctx.settings))
+    data.provider = {
+      options: {
+        elevenlabs: {
+          diarize: scribeDiarization(ctx.settings),
+          tag_audio_events: scribeAudioEvents(ctx.settings),
+        },
+      },
+    };
   // OpenRouter ignores top-level prompt. Do not silently claim context parity.
   const init = jsonBody(data);
   return baseResponse(
@@ -146,7 +153,7 @@ async function elevenlabs(ctx: CloudContext) {
           model_id: ctx.selected.model.id,
           language_code: ctx.language === 'auto' ? undefined : ctx.language,
           timestamps_granularity: 'word',
-          tag_audio_events: false,
+          tag_audio_events: scribeAudioEvents(ctx.settings),
           diarize: scribeDiarization(ctx.settings),
         }),
       });
@@ -154,6 +161,9 @@ async function elevenlabs(ctx: CloudContext) {
   return {
     ...r,
     language: r.language_code,
+    audioEvents: r.words
+      ?.filter((w: any) => w.type === 'audio_event')
+      .map((w: any) => ({ start: w.start, end: w.end, text: w.text, speaker_id: w.speaker_id })),
     words: r.words
       ?.filter((w: any) => w.type === 'word')
       .map((w: any) => ({ ...w, word: w.text, speaker: w.speaker_id })),

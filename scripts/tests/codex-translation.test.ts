@@ -40,9 +40,11 @@ process.stdin.on('end', () => {
   fs.writeFileSync('received-prompt.txt', input);
   fs.writeFileSync('received-args.json', JSON.stringify(args));
   if (mode === 'slow') { setInterval(() => {}, 1000); return; }
-  const source = JSON.parse(input.split('\\n').at(-1)).source_srt;
+  const payload = JSON.parse(input.split('\\n').at(-1));
+  const source = payload.source_srt || '';
   let result = source.replaceAll('Merhaba!', 'Hello!').replaceAll('Nasılsın?', 'How are you?');
   if (mode === 'retimed') result = result.replace('00:00:01,000', '00:00:01,001');
+  if (mode === 'editorial') result = JSON.stringify({version:1,cues:payload.runs.flatMap(r => r.anchors.map(a => ({parts:[{from:a[0],to:a[0],text:'Hello!'}],kind:'dialogue',action:'keep'})))});
   fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], result);
   if (mode === 'quota') console.log(JSON.stringify({ type:'turn.failed', error:{message:'429 usage limit exceeded'} }));
   else if (mode !== 'incomplete') console.log(JSON.stringify({ type:'turn.completed', usage:{input_tokens:30, output_tokens:40} }));
@@ -123,6 +125,44 @@ test('whole-film prompt retains all 1,042 cues as one task', () => {
   const prompt = codexPrompt(full, context);
   assert.match(prompt, /Return all 1042 cues/);
   assert.equal(JSON.parse(prompt.split('\n').at(-1)!).source_srt, full);
+  assert.match(prompt, /Known songs:/);
+  assert.match(prompt, /never complete a verse from memory/);
+});
+
+test('editorial CLI output publishes mapped review files and resumes without another request', async () => {
+  const { editorialSource } = await import('../lib/editorial-subtitles.js');
+  const f = await fixture('editorial');
+  const editorialContext = {
+    ...context,
+    editorial: editorialSource(source),
+    songReferences: 'A possible song title',
+  };
+  const result = await translateWithCodex(f.input, f.output, editorialContext, null, f.options);
+  assert.equal(result.report.mode, 'editorial');
+  assert.equal(result.report.timestampsIdentical, false);
+  assert.equal(result.report.editorial?.coveredAnchors, 2);
+  assert.ok(result.reviewSourceFile && result.reviewTargetFile);
+  assert.equal(await fs.readFile(f.input, 'utf8'), source);
+  const receiptFile = path.join(f.workDir, 'codex-receipt.json');
+  const receipt = JSON.parse(await fs.readFile(receiptFile, 'utf8'));
+  await fs.writeFile(
+    receiptFile,
+    JSON.stringify({ ...receipt, completed: false, status: 'running', turnCompleted: true }),
+  );
+  await fs.rm(result.reviewSourceFile);
+  await translateWithCodex(f.input, f.output, editorialContext, null, f.options);
+  assert.equal(await fs.readFile(path.join(f.workDir, 'calls.txt'), 'utf8'), 'exec\n');
+  await fs.access(result.reviewSourceFile);
+  await assert.rejects(
+    translateWithCodex(
+      f.input,
+      f.output,
+      { ...editorialContext, songReferences: 'Changed reference' },
+      null,
+      f.options,
+    ),
+    /start a new job/,
+  );
 });
 test('CLI invocation keeps subscription auth, disables tools, and strips API environment secrets', () => {
   const args = codexArgs(root, path.join(root, 'out.srt'), 'my-model');
@@ -402,6 +442,62 @@ test(
       assert.equal(chunks.length, 0);
       const catalog = await (await request('/api/subtitle-translations')).json();
       assert.equal(catalog.files.length, 3);
+      assert.equal(
+        (
+          await request('/api/subtitle-translations', {
+            ...base,
+            content: source,
+            translationMode: 'invalid',
+          })
+        ).status,
+        400,
+      );
+      assert.equal(
+        (
+          await request('/api/subtitle-translations', {
+            ...base,
+            content: source,
+            songReferences: 'x'.repeat(8001),
+          })
+        ).status,
+        400,
+      );
+      const editorialBody = {
+        ...base,
+        filename: 'speaker-source.srt',
+        model: 'editorial',
+        translationMode: 'editorial',
+        songReferences: 'A possible song title',
+      };
+      const editorialId = (
+        await (await request('/api/subtitle-translations', editorialBody)).json()
+      ).jobId;
+      let editorialJob;
+      for (let i = 0; i < 40; i++) {
+        editorialJob = await (await request(`/api/jobs/${editorialId}`)).json();
+        if (['completed', 'failed'].includes(editorialJob.status)) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      assert.equal(editorialJob.status, 'completed', editorialJob.error);
+      assert.ok(editorialJob.result.reviewSourceFile && editorialJob.result.reviewTargetFile);
+      const editorialReport = await (
+        await request(editorialJob.result.translationReviewFile)
+      ).json();
+      assert.equal(editorialReport.mode, 'editorial');
+      assert.equal(editorialReport.editorial.coveredAnchors, 2);
+      assert.equal(editorialReport.editorial.cues[0].speaker, 'movie:0');
+      assert.equal(
+        (await (await request('/api/subtitle-translations', editorialBody)).json()).jobId,
+        editorialId,
+      );
+      const notesChanged = await (
+        await request('/api/subtitle-translations', {
+          ...editorialBody,
+          songReferences: 'Different reference',
+        })
+      ).json();
+      assert.notEqual(notesChanged.jobId, editorialId);
+      await request(`/api/jobs/${notesChanged.jobId}/cancel`, {});
       for (const changed of [false, true]) {
         if (changed)
           await fs.writeFile(

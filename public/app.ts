@@ -120,6 +120,8 @@ function languages() {
     translateWithCodex: String($<HTMLInputElement>('translateWithCodex').checked),
     keepIntermediates: String($<HTMLInputElement>('keepIntermediates').checked),
     codexModel: $<HTMLInputElement>('codexModel').value.trim(),
+    translationMode: $<HTMLSelectElement>('pipelineTranslationMode').value,
+    songReferences: $<HTMLTextAreaElement>('pipelineSongReferences').value.trim(),
   };
 }
 interface ProviderModel {
@@ -606,6 +608,8 @@ async function showJob(id: string) {
     details.append(
       download('Translation integrity and readability report', result.translationReviewFile),
     );
+  if (result.editorialSourceFile)
+    details.append(download('Source words and timing evidence', result.editorialSourceFile));
   if (result.subtitleAssFile)
     details.append(
       download(`Styled ASS (${result.sourceLanguage || 'original'})`, result.subtitleAssFile),
@@ -849,12 +853,14 @@ function initializeCodexTranslations() {
     if (filename) {
       $<HTMLInputElement>('translationUpload').value = '';
       $<HTMLInputElement>('translationTitle').value = filename.replace(/\.srt$/i, '').slice(0, 200);
+      $<HTMLSelectElement>('translationMode').value = 'editorial';
     }
   });
   $('translationUpload').addEventListener('change', () => {
     const file = $<HTMLInputElement>('translationUpload').files?.[0];
     if (file) {
       $<HTMLSelectElement>('translationSource').value = '';
+      $<HTMLSelectElement>('translationMode').value = 'fixed';
       $<HTMLInputElement>('translationTitle').value = file.name
         .replace(/\.(srt|txt)$/i, '')
         .slice(0, 200);
@@ -888,6 +894,8 @@ function initializeCodexTranslations() {
         sourceLanguage: $<HTMLInputElement>('translationSourceLanguage').value.trim(),
         targetLanguage: $<HTMLInputElement>('translationTargetLanguage').value.trim(),
         model: $<HTMLInputElement>('codexModel').value.trim(),
+        translationMode: $<HTMLSelectElement>('translationMode').value,
+        songReferences: $<HTMLTextAreaElement>('songReferences').value.trim(),
       });
       await refresh();
       await showJob(result.jobId);

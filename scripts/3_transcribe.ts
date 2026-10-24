@@ -11,7 +11,7 @@ import { at, persistentPath, jobId as validateId, readJson, writeJson } from './
 import { WHISPER_PYTHON, whisperEnv, run, checkAbort } from './lib/process.js';
 import { cloudPlan, checkCloudPlan, transcribeCloud, usageReport } from './providers/client.js';
 import { WhisperWorker } from './lib/whisper-worker.js';
-import { fullMovie, scribeDiarization } from './lib/transcription-mode.js';
+import { fullMovie, scribeDiarization, scribeAudioEvents } from './lib/transcription-mode.js';
 
 export function buildSandwichPrompt(
   movieContext: Record<string, any> = {},
@@ -150,6 +150,7 @@ export async function transcribeChunksToSegments(
         compatibleFormat: settings.COMPATIBLE_RESPONSE_FORMAT,
         ...(movie ? { requestMode: 'movie' } : {}),
         ...(scribeDiarization(settings) ? { diarization: true } : {}),
+        ...(scribeAudioEvents(settings) ? { audioEvents: true } : {}),
         endpoint:
           backend === 'compatible' ? ((await credential('TRANSCRIPTION_API_URL')) ?? '') : '',
         region:
@@ -275,6 +276,7 @@ export async function transcribeChunksToSegments(
       records.push({
         chunk,
         segments,
+        audioEvents: saved.response.audioEvents ?? [],
         rawFile,
         language: saved.response.language,
         text:

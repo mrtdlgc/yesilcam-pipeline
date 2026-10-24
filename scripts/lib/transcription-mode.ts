@@ -18,6 +18,13 @@ export function scribeDiarization(settings: Partial<Settings>): boolean {
   );
 }
 
+export function scribeAudioEvents(settings: Partial<Settings>): boolean {
+  return Boolean(
+    settings.TRANSCRIPTION_AUDIO_EVENTS &&
+    scribeDiarization({ ...settings, TRANSCRIPTION_DIARIZATION: true }),
+  );
+}
+
 export function movieSettings(settings: Settings): Settings {
   return fullMovie(settings)
     ? {

@@ -101,6 +101,7 @@ const pathFields = new Set([
   '_original_file',
   'sourceAudio',
   'speakerContextFile',
+  'editorialContextFile',
 ]);
 export function persistentPath(file: string) {
   const relative = path.relative(DATA_ROOT, file);

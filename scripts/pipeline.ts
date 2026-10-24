@@ -39,9 +39,21 @@ import { fullMovie, movieSettings } from './lib/transcription-mode.js';
 import { prepareMovieAudio } from './lib/movie-audio.js';
 import { speakerContext, subtitleHash } from './lib/speakers.js';
 import { writeSubtitleArtifacts } from './lib/subtitle-export.js';
+import { editorialSource, validateEditorialSource } from './lib/editorial-subtitles.js';
+import { shotBoundaries } from './lib/shot-boundaries.js';
+import type { EditorialSource } from '../types/editorial.js';
 
 export function validateSettings(settings: Settings) {
   validateProviderSettings({ ...config, ...settings });
+  if (!['fixed', 'editorial'].includes(settings.TRANSLATION_MODE ?? 'fixed'))
+    throw new Error('Unknown subtitle translation mode');
+  if (
+    settings.TRANSLATION_SONG_REFERENCES !== undefined &&
+    (typeof settings.TRANSLATION_SONG_REFERENCES !== 'string' ||
+      settings.TRANSLATION_SONG_REFERENCES.length > 8000 ||
+      /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(settings.TRANSLATION_SONG_REFERENCES))
+  )
+    throw new Error('Song reference notes must be text of at most 8,000 characters');
   if (!['codex-local'].includes(settings.TRANSLATION_PROVIDER))
     throw new Error('Unknown translation provider');
   if (
@@ -110,6 +122,7 @@ export async function postprocessRecords(
   const kept = [],
     dropped = [],
     all = [];
+  const nativeSegments: Segment[] = [];
   for (let index = 0; index < records.length; index++) {
     checkAbort(options.signal);
     const { chunk, segments } = records[index];
@@ -130,7 +143,10 @@ export async function postprocessRecords(
       kept.push(...filtered.kept.map((segment) => offsetSegment(segment, chunk.startTime)));
       dropped.push(...filtered.dropped.map((segment) => offsetSegment(segment, chunk.startTime)));
     }
-    // Split first so every final cue boundary can be checked against speech.
+    nativeSegments.push(
+      ...processed.map((segment: Segment) => offsetSegment(segment, chunk.startTime)),
+    );
+    // Source export stays compatible; translation can independently regroup native words.
     processed = mergeSegments(processed, { settings });
     await options.onStage?.({
       id: 'filtering',
@@ -173,6 +189,16 @@ export async function postprocessRecords(
     ...segment,
     id: String(index + 1),
   }));
+  await writeJson(at('output', 'reviews', `${manifest.id}-anchors.json`), {
+    segments: nativeSegments,
+    audioEvents: records.flatMap(({ chunk, audioEvents = [] }: any) =>
+      audioEvents.map((event: any) => ({
+        ...event,
+        start: event.start + chunk.startTime,
+        end: event.end + chunk.startTime,
+      })),
+    ),
+  });
   await writeJson(at('output', 'reviews', `${manifest.id}.json`), {
     version: 1,
     jobId: manifest.id,
@@ -290,6 +316,31 @@ async function finalize(manifest: any, srt: string, sourceLanguage: string, opti
     await writeJson(file, { ...options.speakers, sourceHash: subtitleHash(srt) });
     result.speakerFile = publicFile(file);
   }
+  const evidenceFile = at('output', 'reviews', `${id}-editorial-source.json`);
+  let evidence = await readJson<EditorialSource | null>(evidenceFile, null);
+  if (evidence) validateEditorialSource(srt, evidence);
+  else {
+    const native = await readJson(at('output', 'reviews', `${id}-anchors.json`), null);
+    evidence = editorialSource(srt, native?.segments, native?.audioEvents);
+    if (
+      manifest.input &&
+      settings.TRANSLATION_ENABLED &&
+      sourceLanguage !== settings.TARGET_LANGUAGE &&
+      settings.TRANSLATION_MODE === 'editorial'
+    ) {
+      try {
+        Object.assign(evidence, await shotBoundaries(manifest.input, options));
+      } catch (error) {
+        checkAbort(options.signal);
+        evidence.shotDetection = 'unavailable';
+        await options.onWarning?.(
+          'Scene-cut analysis unavailable; source audio timing is retained for review.',
+        );
+      }
+    }
+    await writeJson(evidenceFile, evidence);
+  }
+  result.editorialSourceFile = publicFile(evidenceFile);
   if (sourceLanguage === settings.TARGET_LANGUAGE) {
     result.englishSubtitleFile = publicFile(subtitleFile);
     result.translatedAssFile = publicFile(styled.assFile);
@@ -331,6 +382,10 @@ async function finalize(manifest: any, srt: string, sourceLanguage: string, opti
           sourceLanguage,
           targetLanguage: settings.TARGET_LANGUAGE,
           ...(options.speakers ? { speakers: options.speakers } : {}),
+          ...(settings.TRANSLATION_MODE === 'editorial' ? { editorial: evidence } : {}),
+          ...(settings.TRANSLATION_SONG_REFERENCES
+            ? { songReferences: settings.TRANSLATION_SONG_REFERENCES }
+            : {}),
         },
         async (pct, message) => {
           await options.progress(85 + pct * 0.14, message);
@@ -351,6 +406,10 @@ async function finalize(manifest: any, srt: string, sourceLanguage: string, opti
         },
       );
       result.englishSubtitleFile = publicFile(translated);
+      if (translation.reviewSourceFile && translation.reviewTargetFile) {
+        result.reviewSourceFile = publicFile(translation.reviewSourceFile);
+        result.reviewTargetFile = publicFile(translation.reviewTargetFile);
+      }
       const translatedStyle = await writeSubtitleArtifacts(
         translated,
         await fs.readFile(translated, 'utf8'),
@@ -386,12 +445,19 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
       ...job.settings,
       CODEX_BIN: config.CODEX_BIN,
       CODEX_TRANSLATION_TIMEOUT_MS: config.CODEX_TRANSLATION_TIMEOUT_MS,
+      TRANSLATION_MODE: job.settings?.TRANSLATION_MODE ?? 'fixed',
     };
     validateSettings(settings);
     const workDir = at('temp', id);
     const speakers =
       job.speakers ??
       (job.speakerContextFile ? await readJson(job.speakerContextFile, null) : null);
+    const evidence =
+      settings.TRANSLATION_MODE === 'editorial'
+        ? job.editorialContextFile
+          ? await readJson<EditorialSource>(job.editorialContextFile)
+          : editorialSource(await fs.readFile(job.input, 'utf8'))
+        : null;
     const outputPath = at(
       'output',
       'subtitles',
@@ -405,6 +471,10 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
         sourceLanguage: settings.DEFAULT_LANGUAGE,
         targetLanguage: settings.TARGET_LANGUAGE,
         ...(speakers ? { speakers } : {}),
+        ...(evidence ? { editorial: evidence } : {}),
+        ...(settings.TRANSLATION_SONG_REFERENCES
+          ? { songReferences: settings.TRANSLATION_SONG_REFERENCES }
+          : {}),
       },
       async (pct, message) => {
         await options.progress?.(pct, message);
@@ -444,6 +514,12 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
       sourceLanguage: settings.DEFAULT_LANGUAGE,
       targetLanguage: settings.TARGET_LANGUAGE,
       translationReviewFile: 'report' in result ? publicFile(reportFile) : null,
+      ...(result.reviewSourceFile && result.reviewTargetFile
+        ? {
+            reviewSourceFile: publicFile(result.reviewSourceFile),
+            reviewTargetFile: publicFile(result.reviewTargetFile),
+          }
+        : {}),
     };
   }
   const workDir = at('temp', id),
@@ -488,6 +564,8 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
     PORTABLE_PATHS: manifest.pathSchema === 1,
     TRANSCRIPTION_MODE: manifest.settings.TRANSCRIPTION_MODE ?? 'chunks',
     TRANSCRIPTION_DIARIZATION: manifest.settings.TRANSCRIPTION_DIARIZATION ?? false,
+    TRANSCRIPTION_AUDIO_EVENTS: manifest.settings.TRANSCRIPTION_AUDIO_EVENTS ?? false,
+    TRANSLATION_MODE: manifest.settings.TRANSLATION_MODE ?? 'fixed',
   });
   // Operational limits may be raised for a retry without changing transcript
   // identity. Models, languages and signal-processing choices remain frozen.

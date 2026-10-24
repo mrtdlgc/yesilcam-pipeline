@@ -17,6 +17,7 @@ import { createWriteStream } from 'node:fs';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { config } from './config.js';
+import { editorialSource, validateEditorialSource } from './scripts/lib/editorial-subtitles.js';
 import {
   at,
   leaf,
@@ -47,7 +48,8 @@ import {
   mergeTranslatedChunks,
   validTranslation,
 } from './scripts/4_chunk_srt.js';
-import { parseSrt } from './scripts/lib/srt.js';
+import { parseSrt, segmentsToSrt } from './scripts/lib/srt.js';
+import { formatSubtitleDocument } from './scripts/lib/subtitle-style.js';
 import { publicCatalog, selection } from './scripts/providers/catalog.js';
 import { applyStage, createStages, stopStages } from './scripts/lib/progress.js';
 import { audioReview, audioReviewFile } from './scripts/lib/audio-review.js';
@@ -580,6 +582,8 @@ async function jobInput(body: Record<string, any> = {}) {
     TRANSLATION_ENABLED: booleanOption(body.translateWithCodex, config.TRANSLATION_ENABLED),
     KEEP_INTERMEDIATES: booleanOption(body.keepIntermediates, config.KEEP_INTERMEDIATES),
     TRANSLATION_PROVIDER: 'codex-local',
+    TRANSLATION_MODE: body.translationMode ?? config.TRANSLATION_MODE,
+    TRANSLATION_SONG_REFERENCES: body.songReferences ?? '',
     CODEX_MODEL: body.codexModel ?? config.CODEX_MODEL,
     DEMUCS_ENABLED: false,
     ALIGNMENT_METHOD: alignmentMethod,
@@ -737,6 +741,8 @@ router.post('/api/subtitle-translations', async (req, res) => {
       TARGET_LANGUAGE: targetLanguage,
       CODEX_MODEL: model,
       TRANSLATION_PROVIDER: 'codex-local',
+      TRANSLATION_MODE: req.body?.translationMode ?? 'fixed',
+      TRANSLATION_SONG_REFERENCES: req.body?.songReferences ?? '',
     };
     try {
       validateSettings(settings);
@@ -769,7 +775,7 @@ router.post('/api/subtitle-translations', async (req, res) => {
       dir = at('temp', id);
     const sourceName = filename ?? `${titleSlug(title)}_${id}_${sourceLanguage}.srt`;
     const sourceSubtitleFile = `/output/subtitles/${encodeURIComponent(sourceName)}`;
-    let speakers;
+    let speakers, evidence;
     if (filename) {
       const original = (await store.read()).jobs.find(
         (job) => job.type !== 'translation' && job.result?.subtitleFile === sourceSubtitleFile,
@@ -781,6 +787,37 @@ router.post('/api/subtitle-translations', async (req, res) => {
         );
         if (saved?.sourceHash === subtitleHash(content)) speakers = saved;
       }
+      if (settings.TRANSLATION_MODE === 'editorial' && original?.result?.editorialSourceFile) {
+        evidence = await readJson(
+          at('output', 'reviews', `${jobId(original.id)}-editorial-source.json`),
+        );
+        validateEditorialSource(content, evidence);
+      }
+      // Older films already retain word timings in their review report. Reuse
+      // those only when reconstructing the source proves the same subtitle file.
+      if (settings.TRANSLATION_MODE === 'editorial' && !evidence && original?.result?.reviewFile) {
+        const saved = await readJson(at('output', 'reviews', `${jobId(original.id)}.json`), null);
+        if (
+          saved?.segments?.length &&
+          subtitleHash(
+            formatSubtitleDocument(segmentsToSrt(saved.segments), sourceLanguage).srt,
+          ) === subtitleHash(content)
+        )
+          evidence = editorialSource(content, saved.segments);
+      }
+    }
+    if (settings.TRANSLATION_MODE === 'editorial' && !evidence) {
+      const voices = new Map((speakers?.cues ?? []).map((cue: any) => [String(cue.cueId), cue]));
+      evidence = editorialSource(
+        content,
+        parseSrt(content).map((cue) => {
+          const annotation = voices.get(cue.id) as { speaker: string; scope: string } | undefined;
+          return {
+            ...cue,
+            ...(annotation ? { speaker: annotation.speaker, speakerScope: annotation.scope } : {}),
+          };
+        }),
+      );
     }
     const key = submissionKey({
       type: 'translation',
@@ -790,6 +827,10 @@ router.post('/api/subtitle-translations', async (req, res) => {
       model,
       title,
       speakers: speakers ?? null,
+      ...(evidence ? { editorial: evidence } : {}),
+      ...(settings.TRANSLATION_SONG_REFERENCES
+        ? { songReferences: settings.TRANSLATION_SONG_REFERENCES }
+        : {}),
     });
     const duplicate = (await store.read()).jobs.find(
       (job) =>
@@ -801,6 +842,9 @@ router.post('/api/subtitle-translations', async (req, res) => {
           (job as Job & { sourceSubtitleFile?: string }).sourceSubtitleFile ===
             sourceSubtitleFile &&
           job.settings.TARGET_LANGUAGE === targetLanguage &&
+          (job.settings.TRANSLATION_MODE ?? 'fixed') === settings.TRANSLATION_MODE &&
+          (job.settings.TRANSLATION_SONG_REFERENCES ?? '') ===
+            settings.TRANSLATION_SONG_REFERENCES &&
           job.settings.CODEX_MODEL === model),
     );
     if (duplicate && req.body?.forceNew !== true) return { jobId: duplicate.id, existing: true };
@@ -811,6 +855,10 @@ router.post('/api/subtitle-translations', async (req, res) => {
       ? at('data', 'translation-receipts', id, 'speakers.json')
       : undefined;
     if (speakerContextFile) await writeJson(speakerContextFile, speakers);
+    const editorialContextFile = evidence
+      ? at('data', 'translation-receipts', id, 'editorial-source.json')
+      : undefined;
+    if (editorialContextFile) await writeJson(editorialContextFile, evidence);
     let job: Job;
     try {
       job = await addJob({
@@ -820,10 +868,16 @@ router.post('/api/subtitle-translations', async (req, res) => {
         input: path.join(dir, 'input.srt'),
         sourceSubtitleFile,
         ...(speakerContextFile ? { speakerContextFile } : {}),
+        ...(editorialContextFile ? { editorialContextFile } : {}),
         ...(req.body?.forceNew === true ? {} : { submissionKey: key }),
         sourceLanguage,
         targetLanguage,
-        transcriptionSettings: { TRANSLATION_PROVIDER: 'codex-local', CODEX_MODEL: model },
+        transcriptionSettings: {
+          TRANSLATION_PROVIDER: 'codex-local',
+          CODEX_MODEL: model,
+          TRANSLATION_MODE: settings.TRANSLATION_MODE,
+          TRANSLATION_SONG_REFERENCES: settings.TRANSLATION_SONG_REFERENCES,
+        },
       });
     } catch (error) {
       await fs.rm(dir, { recursive: true, force: true });

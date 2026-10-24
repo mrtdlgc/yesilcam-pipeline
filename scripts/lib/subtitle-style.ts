@@ -66,6 +66,12 @@ export function wrapSubtitle(text: string, language = 'en'): string {
   // Two voices/lyrics already have meaningful line boundaries. Never collapse them.
   if (lines.length > 1 && lines.every((line) => /^[-–—♪♫]/u.test(visibleText(line))))
     return lines.join('\n');
+  if (
+    lines.length === 2 &&
+    /^<i>[\s\S]*<\/i>$/i.test(original) &&
+    lines.every((line) => visibleLength(line) <= 42)
+  )
+    return lines.join('\n');
   const flat = flatText(original);
   if (visibleLength(flat) <= 42) return flat;
   if (lines.length === 2 && lines.every((line) => visibleLength(line) <= 42))

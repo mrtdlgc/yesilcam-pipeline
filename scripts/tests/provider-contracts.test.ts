@@ -210,7 +210,7 @@ for (const id of Object.keys(adapters)) {
       } else if (id === 'elevenlabs') {
         assert.equal(body.get('language_code'), 'tr');
         assert.equal(body.get('timestamps_granularity'), 'word');
-        assert.equal(body.get('tag_audio_events'), 'false');
+        assert.equal(body.get('tag_audio_events'), 'true');
       } else if (id === 'speechmatics')
         assert.equal(JSON.parse(String(body.get('config'))).transcription_config.language, 'tr');
       else if (id === 'xai') {

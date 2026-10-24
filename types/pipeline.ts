@@ -159,6 +159,9 @@ export interface QueueState {
 
 export interface PipelineResult {
   speakerFile?: string;
+  editorialSourceFile?: string;
+  reviewSourceFile?: string;
+  reviewTargetFile?: string;
   subtitleFile: string;
   subtitleAssFile?: string;
   subtitleStyleReviewFile?: string;

@@ -15,6 +15,7 @@ export const config = {
   PORTABLE_PATHS: true, // New checkpoints use DATA_DIR-relative identities
   TRANSCRIPTION_MODE: 'auto', // auto: full movie for direct ElevenLabs, chunks for other providers
   TRANSCRIPTION_DIARIZATION: true, // Scribe only; anonymous speakers remain scoped to each request
+  TRANSCRIPTION_AUDIO_EVENTS: true, // Retain event evidence separately from spoken words
   MOVIE_TRANSCRIPTION_TIMEOUT_MS: 30 * 60 * 1000,
   MAX_MOVIE_AUDIO_BYTES: 512 * 1024 * 1024, // Streamed FLAC, never buffered as one upload in RAM
   CLOUD_MAX_ESTIMATED_COST: Number(process.env.CLOUD_MAX_ESTIMATED_COST || 5), // Per job; estimate, not an invoice cap
@@ -131,6 +132,9 @@ export const config = {
   // === Subtitle translation ===
   TRANSLATION_ENABLED: process.env.TRANSLATION_ENABLED === 'true',
   TRANSLATION_PROVIDER: 'codex-local', // Local Codex CLI with ChatGPT login
+  TRANSLATION_MODE: 'editorial', // New media jobs; uploaded SRT defaults to fixed timings
+  TRANSLATION_SONG_REFERENCES: '', // Optional titles, performance notes or supplied lyric references
+  EDITORIAL_SHOT_DETECTION: true, // Reusable low-resolution scene-cut analysis for video
   CODEX_BIN: process.env.CODEX_BIN || 'codex',
   CODEX_MODEL: process.env.CODEX_MODEL || '', // Empty uses the installed CLI default
   CODEX_TRANSLATION_TIMEOUT_MS: Number(process.env.CODEX_TRANSLATION_TIMEOUT_MS || 30 * 60 * 1000),

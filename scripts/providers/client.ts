@@ -12,7 +12,7 @@ import { readJson, writeJson } from '../lib/files.js';
 import { estimate, selection } from './catalog.js';
 import { adapters } from './adapters.js';
 import { normalize } from './normalize.js';
-import { fullMovie, scribeDiarization } from '../lib/transcription-mode.js';
+import { fullMovie, scribeDiarization, scribeAudioEvents } from '../lib/transcription-mode.js';
 
 export function cloudPlan(chunks: any, settings: Settings, language = settings.DEFAULT_LANGUAGE) {
   const selected = selection(settings, language);
@@ -206,6 +206,7 @@ async function transcribeLocked(
         model: selected.model.id,
         ...(movie ? { requestMode: 'movie' } : {}),
         ...(scribeDiarization(settings) ? { diarization: true } : {}),
+        ...(scribeAudioEvents(settings) ? { audioEvents: true } : {}),
         endpoint: selected.provider.id === 'compatible' ? (endpoint ?? '') : '',
         region: selected.provider.id === 'speechmatics' ? region : '',
       }),

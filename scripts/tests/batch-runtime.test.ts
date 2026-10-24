@@ -79,6 +79,7 @@ process.stdin.on('end', () => {
           ...config,
           CODEX_MODEL: id,
           TRANSLATION_PROVIDER: 'codex-local',
+          TRANSLATION_MODE: 'fixed',
           KEEP_INTERMEDIATES: false,
         },
       })),

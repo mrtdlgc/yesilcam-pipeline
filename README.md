@@ -58,9 +58,10 @@ All inputs—audio uploads, YouTube videos, watched films, and resumed jobs—us
    flagged rather than silently truncated. Chunked jobs can also use local filtering and alignment.
 7. Export SRT, styled ASS, layout/readability reports, and speaker annotations. The default
    Netflix-inspired layout targets two lines of 42 characters; anonymous voice groups are not names.
-8. Optional Codex translation receives the complete SRT and cue-linked speaker context, preserving
-   every cue ID and timestamp. Translating an unchanged saved source later also reuses its matching
-   speaker sidecar. Uploaded or modified subtitles do not inherit unverified annotations.
+8. Optional Codex translation reads the complete film, then chooses meaningful target-language cues
+   from native words and scoped speaker turns. Lyrics follow the selective song policy below.
+   Exact-timing mode remains available. Saved films reuse matching timing evidence without ASR;
+   uploaded or modified subtitles do not inherit unverified annotations.
 
 Your spectral classifier remains in `scripts/workers/audio_analysis_worker.ts`, as a standalone
 diagnostic. `scripts/test_speech_detection.ts` is a separate diagnostic; the live chunker does not
@@ -249,15 +250,61 @@ translation splitting is performed: each film is one task with the complete subt
 optional model field selects a model available to your Codex account; blank uses the CLI default.
 Translation runs with high reasoning and without shell, browser, connector, or subagent tools.
 
-Results appear in the job queue with cancellation and explicit retry. The app rejects missing,
-duplicate, reordered or retimed cues, empty translations and malformed markup. Original cue-number
-and timing lines are copied exactly into UTF-8 BOM / CRLF output; the source stays untouched. The
-downloadable translation report includes usage tokens and readability notes for cues over two lines
-or 42 visible characters per line, plus reading-speed and duration issues. These checks establish
-structural integrity, not linguistic accuracy. Review the film before publishing. Partial/failed
+Choose **Editorial** for natural translated subtitles. This is the default for new media jobs and
+library selections. Codex can regroup adjacent words from one voice into complete thoughts instead
+of inheriting every punctuation cut. Two-speaker captions require distinct scoped voices and one
+short complete sentence per line; the app supplies their dashes. Every original anchor must be
+accounted for exactly once. Missing, repeated, reordered, invented or mixed-speaker ranges are
+rejected. An SRT without native words remains cue-granular; estimated timings never become word
+evidence. Older source reports can supply native words when their exported SRT still matches.
+
+Choose **Exact timing** when synchronization must stay identical. Uploaded subtitles and API calls
+without a mode default to this option. Cue IDs, order and timing lines are checked and copied
+exactly into UTF-8 BOM / CRLF output. No cues, including lyrics, may be omitted in this mode.
+
+Editorial mode translates story-relevant songs in italics and allows incidental background lyrics to
+be omitted with a recorded reason. Omitted lyrics and their translation remain in the correction
+editor and can be restored. An omission needs explicit lyric markers or singing evidence tied to the
+same scoped voice. Music, an unscoped singing event, rhyme or recognition alone cannot justify
+deleting words. Alternating singing and dialogue receive separate cues. Scribe audio events are
+retained separately from speech, but they are **not a reliable singing classifier**: uncertain
+passages stay present and are flagged for listening. No additional paid audio classifier is used.
+
+Both prompts include a **known-song rule**. Optional song notes can contain titles, performance
+details or supplied reference lyrics. Remembered lyrics are hypotheses, not proof of what this
+performance sang. Codex must not fill missing verses from memory or claim online verification; web
+access is disabled. Editorial source repairs are recorded as review notes while the original
+transcript stays unchanged. Recognized songs still require listening where attribution or wording is
+uncertain.
+
+The final renderer uses source-word bounds, natural line wrapping, duration and reading-speed
+checks. It allows up to half a second of trailing display time where space permits. For new video
+jobs translated immediately, an optional FFmpeg scene-cut scan uses two CPU threads, low-resolution
+frames and a ten-minute maximum, then retains its results with the source evidence. Continuous
+speech is not cut to fit a scene change. Constant-frame-rate video supplies the two-frame gap;
+audio-only or unverified frame rates use an 80 ms fallback. Unavoidable overlaps, short cues and
+fast reading are flagged without discarding dialogue. Missing scene analysis is reported.
+`EDITORIAL_SHOT_DETECTION=false` skips the scan.
+
+The translation report includes token usage, source-anchor ranges, song decisions, proposed source
+repairs and readability notes. Paired review files follow the new cue boundaries; original source
+downloads and existing human corrections remain separate. Existing manifests retain their prior mode
+and audio-event request identity. Completed Codex receipts remain reusable across prompt updates;
+applying new instructions to completed work requires a new translation job.
+
+Results appear in the job queue with cancellation and explicit retry. These checks establish
+structural integrity, not linguistic accuracy or Netflix delivery certification. Review a real film
+before release; the fixture suite does not evaluate live model translation quality. Partial/failed
 Codex responses are never published. There is no automatic retry that silently spends more plan
 allowance. A verified result is reusable after interruption; an incomplete task starts over when you
 explicitly retry.
+
+The editorial targets follow Netflix's
+[English timed-text guide](https://partnerhelp.netflixstudios.com/hc/en-us/articles/217350977-English-USA-Timed-Text-Style-Guide),
+[template guide](https://partnerhelp.netflixstudios.com/hc/en-us/articles/219375728-Timed-Text-Style-Guide-Subtitle-Templates)
+and
+[timing guidance](https://partnerhelp.netflixstudios.com/hc/en-us/articles/360051554394-Timed-Text-Style-Guide-Subtitle-Timing-Guidelines).
+Visual placement, linguistic accuracy and ambiguous singing still need screening.
 
 Native installs: run `codex login` as the same OS user running the app. Docker includes the CLI; run
 `codex login --device-auth` in its terminal once. Set `CODEX_BIN` to an absolute executable path if
