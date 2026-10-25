@@ -767,6 +767,8 @@ router.post('/api/upload-audio', async (req, res) => {
     const uploadLimit = localMedia
       ? Math.min(config.MAX_UPLOAD_BYTES, config.MAX_MOVIE_AUDIO_BYTES)
       : config.MAX_UPLOAD_BYTES;
+    if (hosted && !localMedia)
+      fail(400, 'Prepare this movie in the browser before transferring its audio');
     assertQueueCapacity(await store.read());
     const declared =
       req.headers['content-length'] === undefined ? null : Number(req.headers['content-length']);
@@ -797,6 +799,18 @@ router.post('/api/upload-audio', async (req, res) => {
       });
       clearTimeout(timer);
       if (!bytes || (declared !== null && bytes !== declared)) fail(400, 'Incomplete upload');
+      if (hosted) {
+        // Never let an uploaded playlist ask FFprobe/FFmpeg to read server-side files.
+        const handle = await fs.open(input, 'r');
+        try {
+          const magic = Buffer.alloc(4);
+          await handle.read(magic, 0, 4, 0);
+          if (!magic.equals(Buffer.from('fLaC')))
+            fail(400, 'Hosted transfers accept browser-prepared FLAC audio only');
+        } finally {
+          await handle.close();
+        }
+      }
       const info = await probe(input, { signal: controller.signal });
       if (localMedia) validateLocalAudio(info, localMedia);
       if (info.duration > config.MAX_INPUT_DURATION_SEC) fail(413, 'Audio duration exceeds limit');

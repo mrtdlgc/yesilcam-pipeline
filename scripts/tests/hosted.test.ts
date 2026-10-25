@@ -185,6 +185,34 @@ test(
         subtitle: { content: source, language: 'tr', source: 'local-embedded' },
       };
       const jobs = [];
+      assert.equal(
+        (await request(alice.cookie, '/api/upload-audio', 'POST', 'unprepared-media')).status,
+        400,
+      );
+      const transfer = await json(await request(alice.cookie, '/api/local-audio', 'POST', body));
+      assert.ok(transfer.uploadId);
+      assert.equal(
+        (
+          await request(
+            bob.cookie,
+            `/api/upload-audio?localUploadId=${transfer.uploadId}`,
+            'POST',
+            '#EXTM3U',
+          )
+        ).status,
+        404,
+      );
+      assert.equal(
+        (
+          await request(
+            alice.cookie,
+            `/api/upload-audio?localUploadId=${transfer.uploadId}`,
+            'POST',
+            '#EXTM3U',
+          )
+        ).status,
+        400,
+      );
       for (const account of [alice, bob]) {
         const response = await request(account.cookie, '/api/local-subtitles', 'POST', body);
         assert.equal(response.status, 201, await response.clone().text());
