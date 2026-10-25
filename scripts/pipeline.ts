@@ -45,6 +45,7 @@ import { extractEmbeddedSubtitles } from './lib/embedded-subtitles.js';
 import type { ExistingSubtitle } from './lib/embedded-subtitles.js';
 import { assertPipelineProviders } from './lib/pipeline-readiness.js';
 import type { EditorialSource } from '../types/editorial.js';
+import { validateLocalAudio } from './lib/local-media.js';
 
 export function validateSettings(settings: Settings) {
   validateProviderSettings({ ...config, ...settings });
@@ -327,7 +328,17 @@ async function finalize(manifest: any, srt: string, sourceLanguage: string, opti
       settings.TRANSLATION_MODE === 'editorial'
     ) {
       try {
-        Object.assign(evidence, await mediaTiming(manifest.input, options));
+        Object.assign(
+          evidence,
+          manifest.localMedia
+            ? {
+                duration: manifest.localMedia.duration,
+                frameRate: manifest.localMedia.frameRate,
+                cuts: [],
+                shotDetection: 'not-run',
+              }
+            : await mediaTiming(manifest.input, options),
+        );
       } catch (error) {
         checkAbort(options.signal);
         await options.onWarning?.(
@@ -547,6 +558,8 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
       imdbId: job.imdbId,
       input: job.input,
       sourceStat: job.sourceStat,
+      localMedia: job.localMedia,
+      localSubtitle: job.localSubtitle,
       settings,
       audioInput: 'original',
       stage: 'new',
@@ -600,6 +613,13 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
   if (manifest.stage === 'completed') return manifest.result;
   if (!manifest.chunks) {
     if (manifest.existingSubtitles) return reuseSubtitles(manifest, null, common);
+    if (manifest.localSubtitle) {
+      const { file, hash, ...origin } = manifest.localSubtitle;
+      const content = await fs.readFile(file, 'utf8');
+      if (subtitleHash(content) !== hash)
+        throw new Error('Saved local subtitles changed; restore the original track');
+      return reuseSubtitles(manifest, { ...origin, content }, common);
+    }
     if (!manifest.lookedUp) {
       await progress(5, 'Checking embedded and online subtitles before transcription');
       await options.onStage?.({
@@ -608,7 +628,7 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
         detail: 'Checking embedded and online subtitle tracks',
       });
       let existing;
-      if (manifest.type === 'video') {
+      if (manifest.type === 'video' && !manifest.localMedia) {
         try {
           const embedded = await extractEmbeddedSubtitles(manifest.input, {
             ...common,
@@ -631,7 +651,7 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
         existing = await checkExistingSubtitles(manifest.youtubeUrl, manifest.imdbId, {
           ...common,
           targetLanguage: settings.TARGET_LANGUAGE,
-          input: manifest.type === 'video' ? manifest.input : null,
+          input: manifest.type === 'video' && !manifest.localMedia ? manifest.input : null,
         });
       if (existing && 'referenceOnly' in existing && existing.referenceOnly) {
         const reference = at('found', `${titleSlug(manifest.title)}_${id}_reference.srt`);
@@ -699,36 +719,49 @@ export async function runPipeline(job: any, options: PipelineOptions = {}) {
         : 'Cutting lossless chunks while preserving film offsets',
     );
     const info = await probe(input, { signal: options.signal });
+    if (manifest.localMedia) validateLocalAudio(info, manifest.localMedia);
     const audio = info.streams.filter((stream: any) => stream.codec_type === 'audio')[
       settings.AUDIO_STREAM_INDEX
     ];
     if (!audio) throw new Error('Configured audio stream does not exist');
-    const pcmBytes = manifest.originalChunks
-      ? 0
-      : movie
-        ? info.duration * 32000
-        : info.duration *
-          4 *
-          Math.min(Number(audio.sample_rate) || 48000, 48000) *
-          Math.min(audio.channels || 2, 2);
+    const pcmBytes =
+      manifest.originalChunks || (manifest.localMedia && movie)
+        ? 0
+        : movie
+          ? info.duration * 32000
+          : info.duration *
+            4 *
+            Math.min(Number(audio.sample_rate) || 48000, 48000) *
+            Math.min(audio.channels || 2, 2);
     manifest.chunks = await withTempBudget(
       Math.ceil(pcmBytes * 1.02 + 32 * 1024 * 1024),
       async () => {
         const chunks =
           manifest.originalChunks ??
-          (movie
-            ? await prepareMovieAudio(input, workDir, common)
-            : await chunkAudio(input, id, {
-                ...common,
-                onProgress: async (done, total) =>
-                  options.onStage?.({
-                    id: 'chunking',
-                    completed: done,
-                    total,
-                    unit: 'chunks',
-                    detail: `Saved ${done}/${total} lossless chunks`,
-                  }),
-              }));
+          (manifest.localMedia && movie
+            ? [
+                {
+                  id: 0,
+                  file: input,
+                  startTime: 0,
+                  endTime: info.duration,
+                  hasSpeech: null,
+                  audioFormat: '16kHz-mono-s16-flac',
+                },
+              ]
+            : movie
+              ? await prepareMovieAudio(input, workDir, common)
+              : await chunkAudio(input, id, {
+                  ...common,
+                  onProgress: async (done, total) =>
+                    options.onStage?.({
+                      id: 'chunking',
+                      completed: done,
+                      total,
+                      unit: 'chunks',
+                      detail: `Saved ${done}/${total} lossless chunks`,
+                    }),
+                }));
         const currentSource = await fs.stat(input);
         if (
           currentSource.size !== manifest.sourceStat.size ||

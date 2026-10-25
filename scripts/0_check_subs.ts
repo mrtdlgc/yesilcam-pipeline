@@ -49,9 +49,6 @@ export async function searchOpenSubtitles({
   } else if (imdbId) {
     if (!/^(tt)?\d{5,12}$/.test(imdbId)) throw new Error('Invalid IMDb ID');
     params.set('imdb_id', imdbId.replace(/^tt/, ''));
-  } else if (movie) {
-    params.set('moviehash', movie.hash);
-    params.set('moviebytesize', String(movie.size));
   } else return null;
   const data = (
     await fetchLimited(`https://api.opensubtitles.com/api/v1/subtitles?${params}`, {
@@ -134,11 +131,11 @@ export async function checkExistingSubtitles(
       await options.onWarning?.(`Subtitle lookup failed: ${error.message}`);
     }
   }
-  if (imdbId || (options.input && (await credential('OPENSUBTITLES_API_KEY')))) {
+  if (imdbId || ((options.input || options.movie) && (await credential('OPENSUBTITLES_API_KEY')))) {
     try {
       return await searchOpenSubtitles({
         imdbId,
-        movie: options.input ? await movieHash(options.input) : null,
+        movie: options.movie ?? (options.input ? await movieHash(options.input) : null),
         language,
         signal: options.signal,
       });

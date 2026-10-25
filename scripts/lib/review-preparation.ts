@@ -206,7 +206,11 @@ export async function prepareSubtitleReview(
       if (error.code === 'ENOENT') return null;
       throw error;
     });
-    if (existing?.media || (existing && job.type === 'translation' && !sourceJob))
+    if (
+      existing?.localMedia ||
+      existing?.media ||
+      (existing && job.type === 'translation' && !sourceJob)
+    )
       return screeningLinks(job.id, existing.languages, existing.targetLanguage);
     const settings = { ...config, ...job.settings };
     const manifest = await readJson<Manifest | null>(at('temp', job.id, 'manifest.json'), null);
@@ -262,8 +266,10 @@ export async function prepareSubtitleReview(
     const sourceManifest = sourceJob
       ? await readJson(at('temp', sourceJob.id, 'manifest.json'), null)
       : null;
-    let input =
-      job.type === 'translation'
+    const localMedia = job.localMedia ?? sourceJob?.localMedia;
+    let input = localMedia
+      ? undefined
+      : job.type === 'translation'
         ? sourceManifest?.input || sourceJob?.input
         : manifest?.input || job.input;
     const inherited = sourceJob
@@ -285,7 +291,7 @@ export async function prepareSubtitleReview(
     )
       input = undefined;
     let downloaded = false;
-    if (!input && job.youtubeUrl) {
+    if (!localMedia && !input && job.youtubeUrl) {
       downloaded = true;
       input = await withTempBudget(
         settings.MAX_UPLOAD_BYTES,
@@ -321,7 +327,7 @@ export async function prepareSubtitleReview(
             : (sourceJob?.settings.AUDIO_STREAM_INDEX ?? settings.AUDIO_STREAM_INDEX),
         },
       }));
-    } else if (job.type !== 'translation')
+    } else if (!localMedia && job.type !== 'translation')
       throw new Error(
         'Source media is missing. Restore the original file and prepare the screening again.',
       );
@@ -340,12 +346,15 @@ export async function prepareSubtitleReview(
       targetLanguage,
       media,
       duration,
+      ...(localMedia ? { localMedia, duration: localMedia.duration } : {}),
       speakers,
       warnings,
       omissions,
-      mediaMessage: media
-        ? ''
-        : 'This subtitle-only job has no linked film. Choose a local video in the editor to check timing.',
+      mediaMessage: localMedia
+        ? 'Open the matching local movie to watch and correct subtitles. Your movie stays on this computer.'
+        : media
+          ? ''
+          : 'This subtitle-only job has no linked film. Choose a local video in the editor to check timing.',
     });
     return screeningLinks(job.id, document.languages, targetLanguage);
   });

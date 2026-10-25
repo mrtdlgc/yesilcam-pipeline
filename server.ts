@@ -56,6 +56,13 @@ import { audioReview, audioReviewFile } from './scripts/lib/audio-review.js';
 import { prepareReviewWaveform } from './scripts/lib/review-waveform.js';
 import { assertPipelineProviders } from './scripts/lib/pipeline-readiness.js';
 import {
+  localMediaMetadata,
+  localSubtitle,
+  validateLocalAudio,
+} from './scripts/lib/local-media.js';
+import { checkExistingSubtitles } from './scripts/0_check_subs.js';
+import { subtitleLanguage } from './scripts/lib/embedded-subtitles.js';
+import {
   migratePreparedAudio,
   originalAudioSettings,
   configurePausedAudio,
@@ -140,6 +147,14 @@ const fail = (status: number, message: string): never => {
   throw Object.assign(new Error(message), { status });
 };
 const terminal = new Set(['completed', 'failed', 'cancelled']);
+const localAudioUploads = new Map<
+  string,
+  {
+    data: Awaited<ReturnType<typeof jobInput>>;
+    media: ReturnType<typeof localMediaMetadata>;
+    expires: number;
+  }
+>();
 let active: { id: string; controller: AbortController } | null = null;
 let pumping = false,
   stopping = false,
@@ -517,7 +532,7 @@ app.use((req, res, next) => {
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
     'Content-Security-Policy':
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+      "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
   });
   res.set('Cache-Control', 'no-store');
   if (PUBLIC_ORIGIN.protocol === 'https:') res.set('Strict-Transport-Security', 'max-age=31536000');
@@ -537,7 +552,7 @@ router.get('/app-config.js', (req, res) =>
   res
     .type('application/javascript')
     .send(
-      `window.APP_BASE_PATH=${JSON.stringify(BASE_PATH)};window.APP_DEFAULT_LANGUAGE=${JSON.stringify(config.DEFAULT_LANGUAGE)};window.APP_TARGET_LANGUAGE=${JSON.stringify(config.TARGET_LANGUAGE)};window.APP_MAX_UPLOAD_BYTES=${config.MAX_UPLOAD_BYTES};window.APP_KEEP_INTERMEDIATES=${config.KEEP_INTERMEDIATES};window.APP_TRANSLATION_ENABLED=${config.TRANSLATION_ENABLED};`,
+      `window.APP_BASE_PATH=${JSON.stringify(BASE_PATH)};window.APP_DEFAULT_LANGUAGE=${JSON.stringify(config.DEFAULT_LANGUAGE)};window.APP_TARGET_LANGUAGE=${JSON.stringify(config.TARGET_LANGUAGE)};window.APP_MAX_UPLOAD_BYTES=${config.MAX_UPLOAD_BYTES};window.APP_MAX_INPUT_DURATION_SEC=${config.MAX_INPUT_DURATION_SEC};window.APP_AUDIO_STREAM_INDEX=${config.AUDIO_STREAM_INDEX};window.APP_MAX_MOVIE_AUDIO_BYTES=${config.MAX_MOVIE_AUDIO_BYTES};window.APP_KEEP_INTERMEDIATES=${config.KEEP_INTERMEDIATES};window.APP_TRANSLATION_ENABLED=${config.TRANSLATION_ENABLED};`,
     ),
 );
 router.use('/api/auth', express.json({ limit: '8kb', strict: true }));
@@ -645,16 +660,38 @@ router.post('/api/upload-audio', async (req, res) => {
   const abort = () => controller.abort();
   req.once('aborted', abort);
   try {
-    const data = await jobInput(req.query, true);
+    const uploadId =
+      req.query.localUploadId === undefined ? null : jobId(String(req.query.localUploadId));
+    const staged = uploadId ? localAudioUploads.get(uploadId) : null;
+    if (uploadId) {
+      localAudioUploads.delete(uploadId);
+      if (!staged || staged.expires < Date.now())
+        fail(
+          410,
+          'Local audio transfer expired or was already used. Check the job list before trying again.',
+        );
+    }
+    const data = staged?.data ?? (await jobInput(req.query, true));
+    let localMedia: ReturnType<typeof localMediaMetadata> | undefined = staged?.media;
+    if (!staged && req.query.localMedia !== undefined) {
+      try {
+        localMedia = localMediaMetadata(JSON.parse(String(req.query.localMedia)));
+      } catch (error) {
+        fail(400, error.message);
+      }
+    }
+    const uploadLimit = localMedia
+      ? Math.min(config.MAX_UPLOAD_BYTES, config.MAX_MOVIE_AUDIO_BYTES)
+      : config.MAX_UPLOAD_BYTES;
     assertQueueCapacity(await store.read());
     const declared =
       req.headers['content-length'] === undefined ? null : Number(req.headers['content-length']);
     if (
       declared !== null &&
-      (!Number.isSafeInteger(declared) || declared <= 0 || declared > config.MAX_UPLOAD_BYTES)
+      (!Number.isSafeInteger(declared) || declared <= 0 || declared > uploadLimit)
     )
       fail(413, 'Upload size exceeds limit');
-    await withTempBudget(declared ?? config.MAX_UPLOAD_BYTES, async () => {
+    await withTempBudget(declared ?? uploadLimit, async () => {
       await fs.mkdir(dir, { recursive: true });
       await writeJson(path.join(dir, 'upload-staging.json'), { jobId: id });
       const input = path.join(dir, 'uploaded-audio');
@@ -663,7 +700,7 @@ router.post('/api/upload-audio', async (req, res) => {
         transform(chunk, encoding, callback) {
           bytes += chunk.length;
           callback(
-            bytes > config.MAX_UPLOAD_BYTES
+            bytes > uploadLimit
               ? Object.assign(new Error('Upload exceeds limit'), { status: 413 })
               : null,
             chunk,
@@ -677,6 +714,7 @@ router.post('/api/upload-audio', async (req, res) => {
       clearTimeout(timer);
       if (!bytes || (declared !== null && bytes !== declared)) fail(400, 'Incomplete upload');
       const info = await probe(input, { signal: controller.signal });
+      if (localMedia) validateLocalAudio(info, localMedia);
       if (info.duration > config.MAX_INPUT_DURATION_SEC) fail(413, 'Audio duration exceeds limit');
       const type = info.streams.some(
         (stream: { codec_type: string; disposition?: { attached_pic?: number } }) =>
@@ -684,7 +722,22 @@ router.post('/api/upload-audio', async (req, res) => {
       )
         ? 'video'
         : 'audio';
-      const job = await addJob({ ...data, id, type, input });
+      const job = await addJob({
+        ...data,
+        id,
+        type,
+        input,
+        ...(localMedia
+          ? {
+              localMedia,
+              transcriptionSettings: {
+                ...data.transcriptionSettings,
+                AUDIO_STREAM_INDEX: 0,
+                PREPARE_REVIEW: true,
+              },
+            }
+          : {}),
+      });
       accepted = true;
       await fs.rm(path.join(dir, 'upload-staging.json'), { force: true });
       res.status(201).json({ jobId: job.id });
@@ -701,6 +754,84 @@ router.post('/api/upload-audio', async (req, res) => {
   }
 });
 router.use(express.json({ limit: '2mb', strict: true }));
+// Keep large song notes and movie metadata out of upload URLs and proxy header limits.
+router.post('/api/local-audio', async (req, res) => {
+  const data = await jobInput(req.body, true);
+  const media = localMediaMetadata(req.body?.localMedia);
+  assertQueueCapacity(await store.read());
+  for (const [id, pending] of localAudioUploads)
+    if (pending.expires < Date.now()) localAudioUploads.delete(id);
+  if (localAudioUploads.size >= 20)
+    fail(429, 'Other local audio transfers are pending. Try again shortly.');
+  const uploadId = jobId();
+  localAudioUploads.set(uploadId, { data, media, expires: Date.now() + 15 * 60 * 1000 });
+  res.status(201).json({ uploadId });
+});
+router.post('/api/local-subtitle-search', async (req, res) => {
+  const media = localMediaMetadata(req.body?.localMedia);
+  const languages = [
+    ...new Set(
+      [req.body?.targetLanguage, req.body?.sourceLanguage]
+        .map(subtitleLanguage)
+        .filter((language): language is string => Boolean(language) && language !== 'auto'),
+    ),
+  ];
+  if (!media.movieHash || !languages.length) return res.json({ subtitle: null });
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  res.once('close', abort);
+  const timer = setTimeout(abort, 60000);
+  try {
+    for (const language of languages) {
+      const existing = await checkExistingSubtitles(null, null, {
+        movie: { hash: media.movieHash, size: media.size },
+        targetLanguage: language,
+        signal: controller.signal,
+      });
+      if (existing) {
+        try {
+          return res.json({ subtitle: localSubtitle(existing, media, req.body?.targetLanguage) });
+        } catch {
+          /* A malformed or partial online track cannot replace the full dialogue. */
+        }
+      }
+    }
+    res.json({ subtitle: null });
+  } finally {
+    clearTimeout(timer);
+    res.off('close', abort);
+  }
+});
+router.post('/api/local-subtitles', async (req, res) => {
+  const data = await jobInput(req.body, true);
+  const localMedia = localMediaMetadata(req.body?.localMedia);
+  const subtitle = localSubtitle(req.body?.subtitle, localMedia, data.targetLanguage);
+  assertQueueCapacity(await store.read());
+  const id = jobId(),
+    directory = at('temp', id),
+    file = path.join(directory, 'local-subtitles.srt');
+  let accepted = false;
+  try {
+    await atomicWrite(file, subtitle.content);
+    const { content, ...origin } = subtitle;
+    const job = await addJob({
+      ...data,
+      id,
+      type: 'video',
+      localMedia,
+      localSubtitle: { ...origin, file, hash: subtitleHash(content) },
+      transcriptionSettings: {
+        ...data.transcriptionSettings,
+        PREPARE_REVIEW: true,
+        TRANSLATION_MODE: 'fixed',
+      },
+    });
+    accepted = true;
+    res.status(201).json({ jobId: job.id });
+  } finally {
+    if (!accepted) await fs.rm(directory, { recursive: true, force: true });
+  }
+});
 router.get('/api/codex', async (req, res) => res.json(await codexStatus()));
 router.get('/api/subtitle-translations', async (req, res) => {
   const files = [];
@@ -1566,7 +1697,16 @@ router.get(/^\/(output|found)\/(.+)$/, async (req, res) => {
   const file = await contained(at(category), ...parts);
   res.download(file, path.basename(file));
 });
-router.use(express.static(at('public'), { dotfiles: 'deny', fallthrough: true }));
+router.use(
+  express.static(at('public'), {
+    dotfiles: 'deny',
+    fallthrough: true,
+    setHeaders(res, file) {
+      if (file.includes(`${path.sep}vendor${path.sep}`))
+        res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+    },
+  }),
+);
 const errorHandler: ErrorRequestHandler = (error, req, res, next) => {
   const message =
     error.type === 'entity.parse.failed'

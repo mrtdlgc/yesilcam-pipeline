@@ -51,7 +51,8 @@ export function startWaveform(options: Options) {
     width = 0,
     frame = 0,
     stopped = false,
-    loading = false;
+    loading = false,
+    reloadRequested = false;
   let drag: {
     id: string;
     edge: 'start' | 'end';
@@ -343,6 +344,10 @@ export function startWaveform(options: Options) {
       $('waveformRetry').hidden = false;
     } finally {
       loading = false;
+      if (reloadRequested && !stopped) {
+        reloadRequested = false;
+        void load();
+      }
     }
   }
   $('waveformRetry').onclick = () => {
@@ -357,6 +362,10 @@ export function startWaveform(options: Options) {
   setWindow(video.currentTime - span / 2);
   void load();
   return {
+    reload() {
+      if (loading) reloadRequested = true;
+      else void load();
+    },
     refresh() {
       if (drag && drag.id !== options.selected()) drag = null;
       draw();

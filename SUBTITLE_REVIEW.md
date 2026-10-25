@@ -7,8 +7,13 @@ requirement to mark good cues. Watch and edit only the problematic passages.
 For local films, a suitable embedded subtitle track is extracted before any audio preparation or
 ASR. Source tracks go directly to exact-timing translation; tracks already in the target language
 need neither transcription nor translation. Job Details identifies the reused track and preserves
-its original SRT and selection report. Whole-film scene-cut scanning is removed; use the video and
-waveform for any final visual timing refinements.
+its original SRT (and a selection report for server-extracted tracks). Whole-film scene-cut scanning
+is removed; use the video and waveform for any final visual timing refinements.
+
+Local Studio files now use the [hybrid workflow](HYBRID_MEDIA.md): subtitles/audio preparation,
+playback, optional screening conversion and waveforms run in the browser. The VPS runs Codex and ASR
+when needed and stores corrections. Keep Studio open to hand the selected movie to the editor; after
+closing the tabs, choose the matching file again. No screening video is uploaded.
 
 ## Correction workflow
 
@@ -61,11 +66,13 @@ leave-page protection. Export notes remains available as Markdown.
 
 ## Automatic preparation and storage
 
-`PREPARE_REVIEW=true` is the default. New YouTube jobs select video up to 720p, preferring
-H.264/AAC, so transcription and screening use the same downloaded source. Compatible H.264 and
-VP8/VP9 video is remuxed without video encoding. Unsupported video gets a 480p H.264 copy with two
-CPU threads; audio is copied when compatible or encoded to AAC/Opus. Audio-only jobs get audio
-playback. The configured audio stream is used consistently. This work has its own **Prepare
+`PREPARE_REVIEW=true` is the default. Hybrid jobs create the correction document automatically and
+use the browser’s local movie, with no server video preparation. The following server-media path
+applies to YouTube, raw uploads and watched films. New YouTube jobs select video up to 720p,
+preferring H.264/AAC, so transcription and screening use the same downloaded source. Compatible
+H.264 and VP8/VP9 video is remuxed without video encoding. Unsupported video gets a 480p H.264 copy
+with two CPU threads; audio is copied when compatible or encoded to AAC/Opus. Audio-only jobs get
+audio playback. The configured audio stream is used consistently. This work has its own **Prepare
 screening** bar.
 
 Opening the correction editor automatically prepares a compact waveform from the screening's

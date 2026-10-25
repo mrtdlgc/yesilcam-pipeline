@@ -182,9 +182,23 @@
             <button id="openAddCue" hidden>Add cue · A</button>
             <label id="localMediaControl" class="inline" hidden
               >Open matching film
-              <input id="localMedia" type="file" accept="video/*,audio/*" />
+              <input
+                id="localMedia"
+                type="file"
+                accept="video/*,audio/*,.mkv,.mp4,.avi,.mov,.webm"
+              />
             </label>
+            <button id="prepareLocalScreening" class="secondary" hidden>
+              Prepare local screening copy
+            </button>
+            <button id="cancelLocalScreening" class="secondary" hidden>
+              Cancel local preparation
+            </button>
+            <a id="downloadLocalScreening" class="button secondary" hidden
+              >Save local screening copy</a
+            >
           </div>
+          <p id="localPreparationStatus" class="muted" role="status" aria-live="polite"></p>
           <section class="inspector" aria-labelledby="selectedTitle">
             <div class="section-heading">
               <div>

@@ -5,6 +5,11 @@ Codex translation of the complete supplied SRT. This configuration needs FFmpeg 
 preparation, but no local neural inference. The existing word timings, speaker context and fixed
 translation cue boundaries are retained.
 
+Browser local-file jobs use the [hybrid workflow](HYBRID_MEDIA.md). The user’s computer extracts
+subtitles/audio and handles screening and waveforms. Only the necessary text/audio and metadata
+reach the VPS; Codex runs on the VPS using the owner’s login. Browser users do not install Codex.
+Server-folder and YouTube jobs retain the server media path below.
+
 ## Oracle / Coolify setup
 
 Use one container, port 3000 behind HTTPS, and one persistent local volume at `/data`. Set

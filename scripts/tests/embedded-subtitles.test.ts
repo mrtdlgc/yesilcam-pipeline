@@ -21,6 +21,12 @@ const { embeddedTracks, extractEmbeddedSubtitles, subtitleLanguage } =
   await import('../lib/embedded-subtitles.js');
 const { parseSrt } = await import('../lib/srt.js');
 const { runPipeline } = await import('../pipeline.js');
+const { localMediaMetadata, localSubtitle, validateLocalAudio } =
+  await import('../lib/local-media.js');
+const { subtitleHash } = await import('../lib/speakers.js');
+const { prepareSubtitleReview } = await import('../lib/review-preparation.js');
+const { readSubtitleReview, editSubtitleReview } = await import('../lib/subtitle-review.js');
+const { localMovieHash } = await import('../../public/local-media.js');
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async () => {
   throw new Error('Network access is disabled for embedded subtitle fixtures');
@@ -33,6 +39,15 @@ const source =
   '1\n00:00:00,500 --> 00:00:01,500\n<i>Hello.</i>\n\n2\n00:00:04,250 --> 00:00:05,500\nCome home.\n';
 const french = source.replace('Hello.', 'Bonjour.').replace('Come home.', 'Rentre chez toi.');
 const translated = source.replace('Hello.', 'Merhaba.').replace('Come home.', 'Eve gel.');
+const localMedia = {
+  version: 1 as const,
+  name: 'Local movie.mkv',
+  size: 3 * 1024 ** 3,
+  fingerprint: 'a'.repeat(64),
+  duration: 8,
+  frameRate: 24,
+  audioStreamIndex: 0,
+};
 const expectedTimes = (srt: string) =>
   parseSrt(srt).map((cue) => [cue.id, cue.startTime, cue.endTime]);
 await fs.writeFile(
@@ -402,6 +417,97 @@ test(
   },
 );
 
+test('hybrid metadata and subtitle validation reject malformed, oversized and mismatched inputs', async () => {
+  assert.deepEqual(localMediaMetadata({ ...localMedia, unwanted: 'discard' }), localMedia);
+  for (const patch of [
+    { name: '../movie' },
+    { duration: Infinity },
+    { fingerprint: 'short' },
+    { audioStreamIndex: -1 },
+    { size: 0 },
+    { frameRate: 0 },
+  ])
+    assert.throws(() => localMediaMetadata({ ...localMedia, ...patch }), /Invalid local/);
+  assert.equal(localSubtitle({ content: source, language: 'eng' }, localMedia).language, 'en');
+  assert.equal(
+    localSubtitle({ content: source, language: 'en' }, localMedia, 'eng').language,
+    'eng',
+  );
+  assert.throws(() => localSubtitle({ content: source, language: 'und' }, localMedia), /language/);
+  assert.throws(
+    () => localSubtitle({ content: source, language: 'en' }, { ...localMedia, duration: 1 }),
+    /outside/,
+  );
+  assert.throws(
+    () => localSubtitle({ content: source, language: 'en' }, { ...localMedia, duration: 7200 }),
+    /incomplete/,
+  );
+  assert.throws(
+    () => validateLocalAudio({ duration: 8, streams: [{ codec_type: 'video' }] }, localMedia),
+    /movie must stay/,
+  );
+  const file = new File([Buffer.alloc(200000, 1)], 'hash.mkv');
+  assert.equal(
+    await localMovieHash(file),
+    ((200000n + 0x0101010101010101n * 16384n) & 0xffffffffffffffffn).toString(16).padStart(16, '0'),
+  );
+  assert.equal(await localMovieHash(new File(['small'], 'small.mkv')), undefined);
+  assert.throws(
+    () => localMediaMetadata({ ...localMedia, movieHash: 'bad hash' }),
+    /lookup fingerprint/,
+  );
+});
+
+test(
+  'hybrid subtitle jobs translate on the server and preserve local screening corrections without a movie',
+  { timeout: 10000 },
+  async () => {
+    const file = at('temp', 'hybrid-subtitle', 'input.srt');
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, source);
+    const job = {
+      id: 'hybrid-subtitle',
+      title: 'Hybrid movie',
+      type: 'video' as const,
+      localMedia,
+      localSubtitle: { file, hash: subtitleHash(source), language: 'en', source: 'local-embedded' },
+      settings: {
+        ...config,
+        TRANSLATION_ENABLED: true,
+        TARGET_LANGUAGE: 'tr',
+        CODEX_BIN: fake,
+        LOCAL_AUDIO_ENABLED: false,
+      },
+    };
+    const result = await runPipeline(job);
+    assert.match(
+      await fs.readFile(at(...result.englishSubtitleFile.slice(1).split('/')), 'utf8'),
+      /Merhaba/,
+    );
+    assert.equal((await readJson(at('temp', job.id, 'manifest.json'))).chunks, undefined);
+    await prepareSubtitleReview(job as any, result);
+    const review = await readSubtitleReview(job.id);
+    assert.equal(review.media, null);
+    assert.deepEqual(review.localMedia, localMedia);
+    assert.equal(review.duration, 8);
+    await editSubtitleReview(job.id, {
+      revision: review.revision,
+      edits: [{ id: '1', texts: { tr: 'Saved human edit' } }],
+    });
+    const saved = await fs.readFile(at('data', 'subtitle-reviews', `${job.id}.json`), 'utf8');
+    await prepareSubtitleReview(job as any, result);
+    assert.equal(
+      await fs.readFile(at('data', 'subtitle-reviews', `${job.id}.json`), 'utf8'),
+      saved,
+    );
+    assert.equal(
+      await fs.stat(at('review-sessions', job.id)).catch(() => null),
+      null,
+      'no server-side screening media',
+    );
+  },
+);
+
 test(
   'HTTP uploads reuse embedded subtitles without an ASR key, while a fallback fails before audio work',
   { timeout: 20000 },
@@ -532,6 +638,135 @@ test(
       );
       assert.equal(manifest.chunks, undefined, 'missing credentials fail before audio preparation');
       assert.equal(manifest.existingSubtitles, undefined);
+      await request('/api/queue/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paused: false }),
+      });
+      const lookup = await request('/api/local-subtitle-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          localMedia: { ...localMedia, movieHash: '0123456789abcdef' },
+          sourceLanguage: 'en',
+          targetLanguage: 'tr',
+        }),
+      });
+      assert.deepEqual(
+        await lookup.json(),
+        { subtitle: null },
+        'unconfigured online lookup sends no media and falls back cleanly',
+      );
+
+      const hybrid = await request('/api/local-subtitles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Browser-extracted subtitle',
+          sourceLanguage: 'en',
+          targetLanguage: 'tr',
+          translateWithCodex: true,
+          localMedia,
+          subtitle: { content: source, language: 'en' },
+        }),
+      });
+      assert.equal(hybrid.status, 201, await hybrid.clone().text());
+      const hybridId = (await hybrid.json()).jobId;
+      let hybridJob: any;
+      await until(async () => {
+        hybridJob = await (await request(`/api/jobs/${hybridId}`)).json();
+        return (
+          hybridJob.status === 'failed' ||
+          (hybridJob.status === 'completed' &&
+            ['ready', 'failed'].includes(hybridJob.result?.reviewStatus))
+        );
+      });
+      assert.equal(hybridJob.status, 'completed', hybridJob.error);
+      assert.equal(hybridJob.result.reviewStatus, 'ready');
+      const localReview = await (await request(`/api/reviews/${hybridId}`)).json();
+      assert.equal(localReview.media, null);
+      assert.equal(localReview.duration, localMedia.duration);
+      assert.equal(localReview.localMedia.fingerprint, localMedia.fingerprint);
+      const audioRoute =
+        '/api/upload-audio?' +
+        new URLSearchParams({
+          title: 'Browser-extracted audio',
+          sourceLanguage: 'en',
+          targetLanguage: 'tr',
+          provider: 'elevenlabs',
+          model: 'scribe_v2',
+          translateWithCodex: 'false',
+          pauseBeforeTranscription: 'true',
+          keepIntermediates: 'true',
+          localMedia: JSON.stringify(localMedia),
+        });
+      const noVideo = await request(audioRoute, { method: 'POST', body: await fs.readFile(movie) });
+      assert.equal(noVideo.status, 400, 'a hybrid request must never accept a full movie');
+      const flac = path.join(root, 'local.flac');
+      await run('ffmpeg', [
+        '-v',
+        'error',
+        '-i',
+        movie,
+        '-vn',
+        '-sn',
+        '-ar',
+        '16000',
+        '-ac',
+        '1',
+        '-c:a',
+        'flac',
+        flac,
+      ]);
+      const optionsResponse = await request('/api/local-audio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Prepared browser audio',
+          sourceLanguage: 'en',
+          targetLanguage: 'tr',
+          provider: 'elevenlabs',
+          model: 'scribe_v2',
+          translateWithCodex: false,
+          pauseBeforeTranscription: true,
+          keepIntermediates: true,
+          localMedia,
+          songReferences: 'Ş'.repeat(8000),
+        }),
+      });
+      assert.equal(optionsResponse.status, 201);
+      const uploadId = (await optionsResponse.json()).uploadId;
+      const stagedRoute = '/api/upload-audio?localUploadId=' + uploadId;
+      const audioResponse = await request(stagedRoute, {
+        method: 'POST',
+        body: await fs.readFile(flac),
+      });
+      assert.equal(audioResponse.status, 201, await audioResponse.clone().text());
+      const audioId = (await audioResponse.json()).jobId;
+      let audioJob: any;
+      await until(async () => {
+        audioJob = await (await request(`/api/jobs/${audioId}`)).json();
+        return ['paused', 'failed'].includes(audioJob.status);
+      });
+      assert.equal(audioJob.status, 'paused', audioJob.error);
+      assert.equal(
+        audioJob.settings.TRANSLATION_SONG_REFERENCES.length,
+        8000,
+        'large notes use JSON instead of oversized upload headers',
+      );
+      assert.equal(
+        (await request(stagedRoute, { method: 'POST', body: await fs.readFile(flac) })).status,
+        410,
+        'a transfer token is single-use',
+      );
+      const audioManifest = JSON.parse(
+        await fs.readFile(path.join(data, 'temp', audioId, 'manifest.json'), 'utf8'),
+      );
+      assert.equal(
+        audioManifest.chunks[0].file,
+        audioManifest.input,
+        'reuse client-prepared audio without re-encoding on the VPS',
+      );
     } finally {
       if (server.exitCode === null) server.kill('SIGTERM');
       const kill = setTimeout(() => server.kill('SIGKILL'), 4000);

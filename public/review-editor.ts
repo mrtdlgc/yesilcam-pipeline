@@ -1,4 +1,12 @@
 import { startWaveform } from './review-waveform.js';
+import { localWaveform, localScreening, matchLocalFile } from './local-media.js';
+import {
+  recallLocalFile,
+  rememberLocalFile,
+  readLocalWaveform,
+  saveLocalWaveform,
+} from './local-files.js';
+import type { LocalMedia } from './local-types.js';
 
 interface Cue {
   id: string;
@@ -13,6 +21,7 @@ interface Cue {
   changed?: boolean;
 }
 interface Screening {
+  localMedia?: LocalMedia;
   version: 2;
   id: string;
   title: string;
@@ -74,6 +83,15 @@ export async function startEditor(id: string) {
   let captionTrack: TextTrack;
   let waveform: ReturnType<typeof startWaveform>;
   let removedCueId = '';
+  let localFile: File | null = null,
+    localInfo: LocalMedia | undefined;
+  let localController: AbortController | null = null,
+    waveformController: AbortController | null = null;
+  let selectionController: AbortController | null = null;
+  const localProgress = (message: string, percentage = 0) => {
+    $('localPreparationStatus').textContent =
+      `${message}${percentage ? ` ${Math.round(percentage)}%` : ''}`;
+  };
   let newCueDraft: { start: string; end: string; source: string; target: string } | null = null;
   const rows = new Map<string, HTMLButtonElement>();
   const status = (message: string, error = false) => {
@@ -638,26 +656,109 @@ export async function startEditor(id: string) {
   });
   video.addEventListener('error', () => {
     $('localMediaControl').hidden = false;
+    if (document.localMedia && localFile) {
+      $('prepareLocalScreening').hidden = false;
+      localProgress(
+        'This browser cannot play the original format. Prepare a local screening copy below; the movie stays here.',
+      );
+      return;
+    }
     status(
       'Screening media is unavailable. You can open a matching local film while keeping server-saved corrections.',
       true,
     );
   });
-  input('localMedia').onchange = () => {
-    const file = input('localMedia').files?.[0];
-    if (!file) return;
+  async function useLocalFile(file: File) {
+    selectionController?.abort();
+    const controller = (selectionController = new AbortController());
+    if (document.localMedia) {
+      localProgress('Checking that this is the matching film…');
+      const info = await matchLocalFile(file, document.localMedia, controller.signal);
+      controller.signal.throwIfAborted();
+      waveformController?.abort();
+      localFile = file;
+      localInfo = info;
+      rememberLocalFile(id, file);
+      $('localMediaControl').hidden = false;
+    }
     if (localUrl) URL.revokeObjectURL(localUrl);
     localUrl = URL.createObjectURL(file);
     video.src = localUrl;
+    $('prepareLocalScreening').hidden = true;
+    localProgress('Playing your local file. No screening video is uploaded.');
     status('Using your local film for playback. Subtitle corrections still save to the server.');
+    waveform?.reload();
+  }
+  input('localMedia').onchange = () => {
+    const file = input('localMedia').files?.[0];
+    if (file) void useLocalFile(file).catch((error) => localProgress(error.message));
   };
+  $('prepareLocalScreening').onclick = () => {
+    if (!localFile || !localInfo || localController) return;
+    const file = localFile,
+      info = localInfo;
+    const controller = (localController = new AbortController());
+    waveformController?.abort();
+    input('localMedia').disabled = true;
+    $<HTMLButtonElement>('prepareLocalScreening').disabled = true;
+    $('cancelLocalScreening').hidden = false;
+    void localScreening(file, info, controller.signal, localProgress)
+      .then((screening) => {
+        controller.signal.throwIfAborted();
+        if (localUrl) URL.revokeObjectURL(localUrl);
+        localUrl = URL.createObjectURL(screening);
+        video.src = localUrl;
+        const link = $<HTMLAnchorElement>('downloadLocalScreening');
+        link.href = localUrl;
+        link.download = screening.name;
+        link.hidden = false;
+        $('prepareLocalScreening').hidden = true;
+        localProgress(
+          'Local screening ready. Save the copy to reuse it next time without converting again.',
+        );
+      })
+      .catch((error) =>
+        localProgress(
+          controller.signal.aborted ? 'Local screening preparation cancelled.' : error.message,
+        ),
+      )
+      .finally(() => {
+        localController = null;
+        input('localMedia').disabled = false;
+        $<HTMLButtonElement>('prepareLocalScreening').disabled = false;
+        $('cancelLocalScreening').hidden = true;
+        waveform?.reload();
+      });
+  };
+  $('cancelLocalScreening').onclick = () => localController?.abort();
   languageChanged();
   select(selected);
   $('workspace').hidden = false;
   waveform = startWaveform({
     video,
     duration: document.duration,
-    load: () => request(new URL(`${api.pathname}/waveform`, api), {}),
+    load: async () => {
+      if (!document.localMedia) return request(new URL(`${api.pathname}/waveform`, api), {});
+      const media = document.localMedia;
+      const key = `v1:${media.fingerprint}:${media.audioStreamIndex}:${document.duration}`;
+      const saved = await readLocalWaveform(key);
+      if (saved) return saved;
+      if (!localFile || !localInfo)
+        throw new Error('Open the matching local film to see its waveform.');
+      if (localController) throw new Error('The local screening copy is being prepared.');
+      waveformController?.abort();
+      const controller = (waveformController = new AbortController());
+      const data = await localWaveform(
+        localFile,
+        { ...localInfo, duration: document.duration },
+        controller.signal,
+        (message, percentage = 0) => {
+          $('waveformStatus').textContent = `${message} ${Math.round(percentage)}%`;
+        },
+      );
+      await saveLocalWaveform(key, data);
+      return data;
+    },
     cues: () => cues().map((cue) => ({ ...cue, text: cue.texts[language] })),
     selected: () => selected,
     canEdit: () => !commandBusy && !invalidTiming.has(selected),
@@ -671,6 +772,15 @@ export async function startEditor(id: string) {
       select(cueId, false);
     },
   });
+  if (document.localMedia) {
+    $('localMediaControl').hidden = false;
+    localProgress(
+      `Choose ${document.localMedia.name}, or its saved local screening copy. The movie stays on this computer.`,
+    );
+    void recallLocalFile(id)
+      .then((file) => file && useLocalFile(file))
+      .catch((error) => localProgress(error.message));
+  }
   $<HTMLButtonElement>('exportNotes').disabled = false;
   saveStatus(
     pending.size
@@ -936,11 +1046,21 @@ export async function startEditor(id: string) {
     })().catch((error) => status(error.message, true));
   };
   window.addEventListener('beforeunload', (event) => {
-    if (pending.size || invalidTiming.size || newCueDraft || saving || commandBusy) {
+    if (
+      pending.size ||
+      invalidTiming.size ||
+      newCueDraft ||
+      saving ||
+      commandBusy ||
+      localController
+    ) {
       event.preventDefault();
     }
   });
   window.addEventListener('pagehide', () => {
+    localController?.abort();
+    waveformController?.abort();
+    selectionController?.abort();
     persistDraft();
     savePosition(true);
   });

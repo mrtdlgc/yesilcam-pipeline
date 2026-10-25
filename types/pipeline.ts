@@ -1,5 +1,6 @@
 import type { config } from '../config.js';
 import type { WhisperWorker } from '../scripts/lib/whisper-worker.js';
+import type { LocalMedia } from '../public/local-types.js';
 
 export type Settings = typeof config;
 export type StageId =
@@ -86,6 +87,7 @@ export interface Chunk {
   audioFormat?: string;
 }
 export interface PipelineOptions {
+  movie?: { hash: string; size: number };
   settings?: Partial<Settings>;
   signal?: AbortSignal;
   workDir?: string;
@@ -119,6 +121,15 @@ export interface PipelineOptions {
   threshold?: number;
 }
 export interface Job {
+  localMedia?: LocalMedia;
+  localSubtitle?: {
+    file: string;
+    hash: string;
+    language: string;
+    source: string;
+    title?: string;
+    streamIndex?: number;
+  };
   pathSchema?: 1;
   id: string;
   title: string;

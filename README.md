@@ -157,20 +157,24 @@ wrappers are retained in Git history, not shipped in the image.
 
 ## Processing and review
 
-Upload original-quality audio, submit a single YouTube video, or put films in persistent `movies/`
-directory (`/data/movies` in Docker). Enable watching in **Library** after saving the provider key.
-The scanner observes files twice and waits for stability; it fills at most 20 waiting slots and
-checks the remaining films on later scans. **Pause queue** lets the current job finish and prevents
-the next one from starting. Failures and interrupted restarts pause the queue for inspection.
-Failed, interrupted and paused jobs remain visible; use Retry/Resume instead of creating duplicate
-jobs. A scanner reset allows a finished film to be submitted again.
+Choose a **Local file** in Studio, submit a YouTube video, or put films in the server’s persistent
+`movies/` directory (`/data/movies` in Docker). Local files use the
+[hybrid workflow](HYBRID_MEDIA.md): the browser extracts subtitles or compact audio, plays the movie
+and draws its waveform. The movie stays on that computer; Codex translation runs on the server.
+Enable server-folder watching in **Library** after saving the provider key. The scanner observes
+files twice and waits for stability; it fills at most 20 waiting slots and checks the remaining
+films on later scans. **Pause queue** lets the current job finish and prevents the next one from
+starting. Failures and interrupted restarts pause the queue for inspection. Failed, interrupted and
+paused jobs remain visible; use Retry/Resume instead of creating duplicate jobs. A scanner reset
+allows a finished film to be submitted again.
 
 Docker removes temporary media only after successful completion by default. Turn on **Keep temporary
 audio after success** for comparison work. Subtitles, raw ASR checkpoints, translation receipts and
 automatic review sessions and saved corrections remain on the volume. Failed and paused jobs keep
 their recovery files. Exported jobs complete immediately. Screening preparation runs as a separate
-low-priority worker with a duration-scaled timeout; failure retains the source and does not pause
-transcription. Its separate retry never resubmits transcription.
+low-priority worker for server-resident media; hybrid jobs create only the correction document and
+play locally. A preparation failure retains the source and does not pause transcription. Its
+separate retry never resubmits transcription.
 
 Completed jobs open through **Watch & correct**. Fix only problematic text or timing: edits save to
 the server, timing changes apply to both languages, and SRT/ASS downloads immediately reflect saved
@@ -248,9 +252,9 @@ existing transcription/audio stages are not rerun. **Studio** also has an option
 automatically after transcription.
 
 This invokes the installed `codex exec` using the server user's existing **ChatGPT login**. The CLI
-runs locally; the model runs in the cloud and uses your Codex subscription allowance. The app does
-not read/copy OAuth credentials, call paid OpenAI translation APIs, or fall back to API keys. No
-translation splitting is performed: each film is one task with the complete subtitle context. An
+runs on the server; the model runs in the cloud and uses the server owner’s Codex allowance. The app
+does not read/copy OAuth credentials, call paid OpenAI translation APIs, or fall back to API keys.
+No translation splitting is performed: each film is one task with the complete subtitle context. An
 optional model field selects a model available to your Codex account; blank uses the CLI default.
 Translation runs with high reasoning and without shell, browser, connector, or subagent tools.
 
@@ -274,11 +278,12 @@ OCR, which is not automatic; missing-language and partial tracks are reported an
 back to transcription. Subtitle tracks cannot prove complete dialogue coverage, so review sparse
 passages. For films at least ten minutes long, tracks with fewer than ten cues or ending before
 halfway are treated as incomplete. Job Details shows the selected source and offers the original
-extracted subtitle and track report. Translation retries reuse the saved, hash-checked track and
-never pay for ASR just because translation failed. Existing completed jobs and edits are unchanged.
-Local uploads inspect subtitles before requiring ASR credentials; if discovery finds no usable
-track, provider readiness is checked before preparing audio. Codex login is needed only when a
-translation is actually performed on the reused track.
+extracted subtitle. Server-extracted tracks also have a selection report. Translation retries reuse
+the saved, hash-checked track and never pay for ASR just because translation failed. Existing
+completed jobs and edits are unchanged. The browser checks embedded and hash-matched online
+subtitles before preparing audio locally. Server-side uploads inspect subtitles before requiring ASR
+credentials; provider readiness is checked before server audio preparation. Codex login is needed
+only when a translation is actually performed on the reused track.
 
 Editorial mode translates story-relevant songs in italics and allows incidental background lyrics to
 be omitted with a recorded reason. Omitted lyrics and their translation remain in the correction

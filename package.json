@@ -1,7 +1,7 @@
 {
   "name": "yesilcam-subtitle-pipeline",
   "version": "2.0.0",
-  "description": "Automated subtitle generation pipeline for Ye\u015fil\u00e7am films",
+  "description": "Automated subtitle generation pipeline for Yeşilçam films",
   "main": "build/server.js",
   "type": "module",
   "scripts": {
@@ -14,7 +14,8 @@
     "recover:transcription": "tsx scripts/reconcile-transcription.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "docs:providers": "tsx scripts/generate-provider-docs.ts"
+    "docs:providers": "tsx scripts/generate-provider-docs.ts",
+    "test:browser": "npm run build && node scripts/tests/hybrid-browser.mjs"
   },
   "keywords": [
     "subtitles",
@@ -32,8 +33,11 @@
     "node": ">=22.12 <27"
   },
   "devDependencies": {
+    "@ffmpeg/core": "0.12.10",
+    "@ffmpeg/ffmpeg": "0.12.15",
     "@types/express": "5.0.6",
     "@types/node": "24.19.2",
+    "playwright": "1.64.1",
     "prettier": "3.9.10",
     "tsx": "4.23.15",
     "typescript": "7.0.2"

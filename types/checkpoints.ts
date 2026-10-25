@@ -44,6 +44,8 @@ export interface CodexReceipt {
   usage?: unknown;
 }
 export interface Manifest {
+  localMedia?: Job['localMedia'];
+  localSubtitle?: Job['localSubtitle'];
   version: 1;
   pathSchema?: 1;
   id: string;

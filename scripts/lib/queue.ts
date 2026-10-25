@@ -39,6 +39,7 @@ export function jobSummary(job: Job) {
     id: job.id,
     title: job.title,
     type: job.type,
+    localMedia: Boolean(job.localMedia),
     status: job.status,
     progress: job.progress,
     stages: job.stages,

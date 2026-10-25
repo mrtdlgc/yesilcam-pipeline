@@ -1,4 +1,5 @@
-export {};
+import { prepareLocalMedia } from './local-media.js';
+import { rememberLocalFile } from './local-files.js';
 const BASE = window.APP_BASE_PATH || '';
 function $<T extends HTMLElement = HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -363,6 +364,8 @@ function renderJobs(jobs: JobView[], container = 'jobsList') {
         ),
       );
     if (job.error) card.append(element('p', job.error, 'error-message'));
+    if (job.localMedia)
+      card.append(element('p', 'Hybrid · movie and screening stay on your computer', 'field-note'));
     if (job.type === 'translation' && job.logs?.length)
       card.append(element('p', job.logs.at(-1)?.message, 'field-note'));
     if (job.status === 'completed') {
@@ -370,6 +373,10 @@ function renderJobs(jobs: JobView[], container = 'jobsList') {
       if (result?.reviewUrl) {
         const link = element('a', 'Watch & correct', 'btn-small btn-primary');
         link.href = `${BASE}/review-player.html?job=${encodeURIComponent(job.id)}`;
+        if (job.localMedia) {
+          link.target = '_blank';
+          link.rel = 'noopener';
+        }
         card.append(link);
       }
       if (result?.reviewStatus === 'preparing')
@@ -550,10 +557,21 @@ async function showJob(id: string) {
       ),
     );
   if (job.youtubeUrl) details.append(element('p', job.youtubeUrl));
+  if (job.localMedia)
+    details.append(
+      element(
+        'p',
+        'Hybrid job: media preparation and screening happen on your computer. Translation runs on the server.',
+      ),
+    );
   const result = job.result || {};
   if (result.reviewUrl) {
     const link = element('a', 'Watch & correct subtitles', 'btn-small btn-primary');
     link.href = `${BASE}/review-player.html?job=${encodeURIComponent(job.id)}`;
+    if (job.localMedia) {
+      link.target = '_blank';
+      link.rel = 'noopener';
+    }
     details.append(link);
     for (const language of result.reviewLanguages ?? []) {
       details.append(
@@ -1112,61 +1130,128 @@ async function refresh() {
   }
 }
 
+let localPreparation: AbortController | null = null;
 async function upload(file: File) {
-  if ($('dropZone').classList.contains('uploading')) return;
+  if (localPreparation) return;
   const title = $<HTMLInputElement>('uploadTitle').value.trim();
   if (!title) {
     notice('Enter the film title before choosing a file.');
     return;
   }
-  if (!file.size || file.size > window.APP_MAX_UPLOAD_BYTES) {
-    notice('File is empty or exceeds the upload size limit.');
-    return;
-  }
+  const controller = new AbortController();
+  localPreparation = controller;
   const zone = $('dropZone');
   zone.classList.add('uploading');
   $('uploadProgress').classList.remove('hidden');
+  $('cancelLocalPreparation').hidden = false;
+  const progress = (message: string, percentage = 0) => {
+    $('uploadProgressFill').style.width = `${percentage}%`;
+    $('uploadProgressText').textContent =
+      `${message}${percentage ? ` ${Math.round(percentage)}%` : ''}`;
+  };
   try {
-    const query = new URLSearchParams({ title, ...languages() });
-    await new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${BASE}/api/upload-audio?${query}`);
-      xhr.timeout = 31 * 60 * 1000;
-      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-      xhr.setRequestHeader('X-Yesilcam-Request', '1');
-      xhr.upload.onprogress = (event) => {
-        const progress = event.lengthComputable
-          ? Math.round((event.loaded / event.total) * 100)
-          : 0;
-        $('uploadProgressFill').style.width = `${progress}%`;
-        $('uploadProgressText').textContent = `Uploading ${progress}%`;
-      };
-      xhr.onload = () => {
-        try {
-          const result = JSON.parse(xhr.responseText);
-          xhr.status < 300 ? resolve(result) : reject(new Error(result.error || 'Upload failed'));
-        } catch {
-          reject(new Error('Invalid upload response'));
-        }
-      };
-      xhr.onerror = () =>
-        reject(
-          new Error('Upload disconnected or rejected; no job was queued unless it appears below.'),
-        );
-      xhr.ontimeout = () => reject(new Error('Upload timed out'));
-      xhr.onabort = () => reject(new Error('Upload cancelled'));
-      xhr.send(file);
+    const settings = languages();
+    const prepared = await prepareLocalMedia(file, {
+      sourceLanguage: settings.sourceLanguage,
+      targetLanguage: settings.targetLanguage,
+      audioStreamIndex: window.APP_AUDIO_STREAM_INDEX ?? 0,
+      maxDuration: window.APP_MAX_INPUT_DURATION_SEC,
+      maxAudioBytes: Math.min(window.APP_MAX_UPLOAD_BYTES, window.APP_MAX_MOVIE_AUDIO_BYTES),
+      signal: controller.signal,
+      progress,
+      findSubtitles: async (localMedia) =>
+        (
+          await request('/api/local-subtitle-search', {
+            method: 'POST',
+            signal: controller.signal,
+            body: JSON.stringify({
+              sourceLanguage: settings.sourceLanguage,
+              targetLanguage: settings.targetLanguage,
+              localMedia,
+            }),
+          })
+        ).subtitle,
     });
+    controller.signal.throwIfAborted();
+    let result: { jobId: string };
+    if (prepared.subtitle) {
+      progress('Sending extracted subtitles only…');
+      result = await request('/api/local-subtitles', {
+        method: 'POST',
+        signal: controller.signal,
+        body: JSON.stringify({
+          title,
+          ...settings,
+          localMedia: prepared.media,
+          subtitle: prepared.subtitle,
+        }),
+      });
+    } else {
+      const audio = prepared.audio!;
+      const pending = await request('/api/local-audio', {
+        method: 'POST',
+        signal: controller.signal,
+        body: JSON.stringify({ title, ...settings, localMedia: prepared.media }),
+      });
+      const query = new URLSearchParams({ localUploadId: pending.uploadId });
+      result = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const abort = () => xhr.abort();
+        controller.signal.addEventListener('abort', abort, { once: true });
+        xhr.open('POST', `${BASE}/api/upload-audio?${query}`);
+        xhr.timeout = 31 * 60 * 1000;
+        xhr.setRequestHeader('Content-Type', 'audio/flac');
+        xhr.setRequestHeader('X-Yesilcam-Request', '1');
+        xhr.upload.onprogress = (event) =>
+          progress(
+            `Sending audio only (${(audio.size / 1024 ** 2).toFixed(1)} MiB)…`,
+            event.lengthComputable ? (event.loaded / event.total) * 100 : 0,
+          );
+        xhr.onloadend = () => controller.signal.removeEventListener('abort', abort);
+        xhr.onload = () => {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            xhr.status < 300
+              ? resolve(data)
+              : reject(new Error(data.error || 'Audio upload failed'));
+          } catch (error) {
+            reject(error);
+          }
+        };
+        xhr.onerror = () =>
+          reject(new Error('Audio transfer disconnected. Check the job list before trying again.'));
+        xhr.ontimeout = () =>
+          reject(new Error('Audio transfer timed out. Check the job list before trying again.'));
+        xhr.onabort = () => reject(new Error('Audio transfer cancelled.'));
+        controller.signal.throwIfAborted();
+        xhr.send(audio);
+      });
+    }
+    rememberLocalFile(result.jobId, file);
+    notice(
+      prepared.subtitle
+        ? 'Subtitle track sent. The server will handle translation; your movie stays here. Keep this tab open to reuse it in the editor.'
+        : 'Audio sent. The server will handle transcription and translation; your movie stays here. Keep this tab open to reuse it in the editor.',
+    );
     $<HTMLInputElement>('uploadTitle').value = '';
     $<HTMLInputElement>('audioFileInput').value = '';
     await refresh();
   } catch (error) {
-    notice(error.message);
+    notice(
+      controller.signal.aborted
+        ? 'Local preparation cancelled. If a transfer had already finished, check the job list.'
+        : (error?.message ?? String(error)),
+    );
   } finally {
+    localPreparation = null;
     zone.classList.remove('uploading');
     $('uploadProgress').classList.add('hidden');
+    $('cancelLocalPreparation').hidden = true;
   }
 }
+window.addEventListener('beforeunload', (event) => {
+  if (localPreparation) event.preventDefault();
+});
 
 document.addEventListener('DOMContentLoaded', () => {
   $<HTMLSelectElement>('transcriptionProvider').addEventListener('change', () =>
@@ -1274,6 +1359,10 @@ document.addEventListener('DOMContentLoaded', () => {
         $<HTMLButtonElement>(id).disabled = false;
       }
     });
+  $('cancelLocalPreparation').onclick = (event) => {
+    event.stopPropagation();
+    localPreparation?.abort();
+  };
   $('dropZone').addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
@@ -1516,6 +1605,7 @@ function initializeWorkspace() {
 }
 
 interface JobView {
+  localMedia?: boolean;
   id: string;
   title: string;
   status: string;

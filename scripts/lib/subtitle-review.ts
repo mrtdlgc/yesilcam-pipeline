@@ -4,6 +4,7 @@ import { subtitleHash } from './speakers.js';
 import { segmentsToSrt, formatTimestamp } from './srt.js';
 import { subtitleDocument } from './codex-translation.js';
 import { subtitleStyleReport, subtitlesToAss } from './subtitle-style.js';
+import type { LocalMedia } from '../../public/local-types.js';
 
 export interface ReviewCue {
   id: string;
@@ -19,6 +20,7 @@ export interface ReviewCue {
   omitted: boolean;
 }
 export interface SubtitleReview {
+  localMedia?: LocalMedia;
   version: 2;
   id: string;
   title: string;
@@ -57,6 +59,7 @@ export async function readSubtitleReview(id: string): Promise<SubtitleReview> {
   return document;
 }
 export async function createSubtitleReview(input: {
+  localMedia?: LocalMedia;
   id: string;
   title: string;
   source: string;
@@ -123,6 +126,7 @@ export async function createSubtitleReview(input: {
       omitted: input.omissions?.[cue.id] === true,
     }));
     const document: SubtitleReview = {
+      ...(input.localMedia ? { localMedia: input.localMedia } : {}),
       version: 2,
       id: jobId(input.id),
       title: input.title,

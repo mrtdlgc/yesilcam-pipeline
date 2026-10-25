@@ -162,6 +162,15 @@ model or scaling to the film catalogue.
 
 ## 12. Automatic screening and corrections
 
+Run `npm run test:browser` in Brave for the hybrid workflow. Optionally set `HYBRID_LARGE_FILE` to a
+movie over 2 GiB for metadata and short near-end decode checks. See [hybrid media](HYBRID_MEDIA.md).
+In the deployed app, choose a local MKV and inspect network transfers: subtitles or FLAC audio may
+leave the browser; the movie and screening copy must not. Open Watch & correct, save a cue, reload,
+close Studio and reselect the film. A different edition must be rejected. Check local cancellation
+and optional screening conversion; saved screening copies should reopen without conversion.
+
+For the server-resident media path:
+
 Submit an MKV with full source-language text subtitles and enable translation: the subtitle-search
 stage should identify the track, ASR/audio preparation should be skipped, and translated cue times
 should match the extracted source exactly. Repeat with a target-language track (translation also

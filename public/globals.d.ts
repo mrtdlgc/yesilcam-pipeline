@@ -3,6 +3,9 @@ interface Window {
   APP_DEFAULT_LANGUAGE: string;
   APP_TARGET_LANGUAGE: string;
   APP_MAX_UPLOAD_BYTES: number;
+  APP_MAX_INPUT_DURATION_SEC: number;
+  APP_MAX_MOVIE_AUDIO_BYTES: number;
+  APP_AUDIO_STREAM_INDEX: number;
   APP_KEEP_INTERMEDIATES: boolean;
   APP_TRANSLATION_ENABLED: boolean;
 }

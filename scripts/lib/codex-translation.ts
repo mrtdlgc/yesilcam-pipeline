@@ -152,8 +152,8 @@ export async function codexStatus(options: PipelineOptions = {}) {
       version: version.stdout.trim(),
       model: settings.CODEX_MODEL,
       message: available
-        ? 'Signed in with ChatGPT. Full-film translation uses your Codex plan allowance.'
-        : 'Sign in to the local CLI with codex login using ChatGPT. API-key login is not used for translation.',
+        ? "Signed in on the server with ChatGPT. Translation uses the server owner's Codex allowance."
+        : 'The server owner needs to sign in with codex login using ChatGPT. API-key login is not used for translation.',
     };
   } catch (error) {
     checkAbort(options.signal);
@@ -164,7 +164,7 @@ export async function codexStatus(options: PipelineOptions = {}) {
       message:
         error.code === 'ENOENT'
           ? 'Codex CLI is not installed or CODEX_BIN is not reachable by the server.'
-          : 'Local Codex is unavailable or signed out. Run codex login as the user running this server.',
+          : 'Server Codex is unavailable or signed out. Run codex login as the user running this server.',
     };
   }
 }
