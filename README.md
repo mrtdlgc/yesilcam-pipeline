@@ -122,7 +122,7 @@ Qwen3-ASR routes; it does not validate every available provider or subtitle alig
 ## Local development
 
 The web application and tooling use strict TypeScript, ESM, Express, and a small browser client. The
-audio/ML stages remain Python. Use Linux (or the Docker image), Node 22.12+ (Node 24 in the image),
+audio/ML stages remain Python. Use Linux (or the Docker image), Node 22.13+ (Node 24 in the image),
 Python 3.12, FFmpeg/ffprobe, and `flock` from util-linux.
 
 The following are setup/build commands. CI checks the production image on native x64 and ARM64
