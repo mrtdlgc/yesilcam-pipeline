@@ -1,4 +1,4 @@
-name: Verify private studio
+name: Verify studio
 on:
   push:
   workflow_dispatch:

@@ -8,6 +8,8 @@ import type { PipelineOptions, Segment } from '../../types/pipeline.js';
 import { at, atomicWrite, readJson, writeJson } from './files.js';
 import { checkAbort, run } from './process.js';
 import { parseSrt } from './srt.js';
+import { hosted } from './identity.js';
+import { responseStatus, responseTranslation } from './response-translation.js';
 import { validTranslation } from '../4_chunk_srt.js';
 import { formatSubtitleDocument, netflixProfile } from './subtitle-style.js';
 import type { EditorialSource } from '../../types/editorial.js';
@@ -135,6 +137,15 @@ function runtimeArgs() {
 
 export async function codexStatus(options: PipelineOptions = {}) {
   const settings = { ...config, ...options.settings };
+  if (settings.TRANSLATION_PROVIDER !== 'codex-local') return responseStatus(settings);
+  if (hosted)
+    return {
+      available: false,
+      version: null,
+      model: settings.CODEX_MODEL,
+      message:
+        'Hosted translation requires your own provider connection. The server owner’s Codex login is not shared.',
+    };
   try {
     await fs.mkdir(at('data', 'codex-runtime'), { recursive: true, mode: 0o700 });
     const version = await run(settings.CODEX_BIN, ['--version'], {
@@ -254,6 +265,9 @@ export async function translateWithCodex(
         context,
         model: settings.CODEX_MODEL,
         promptVersion: version,
+        ...(settings.TRANSLATION_PROVIDER !== 'codex-local'
+          ? { provider: settings.TRANSLATION_PROVIDER }
+          : {}),
       }),
     );
   const signature = signatureFor(promptVersion);
@@ -308,13 +322,15 @@ export async function translateWithCodex(
       signature,
       completed: false,
       status: 'running',
-      model: settings.CODEX_MODEL || 'Codex CLI default',
+      model:
+        settings.CODEX_MODEL ||
+        (settings.TRANSLATION_PROVIDER === 'codex-local' ? 'Codex CLI default' : 'gpt-5.4'),
       cliVersion: status.version,
     };
     await writeJson(receiptFile, receipt);
     await progress?.(
       5,
-      `Codex is translating the complete subtitle file (${document.cues.length} cues). This uses your ChatGPT subscription.`,
+      `Translating the complete subtitle file (${document.cues.length} cues) using your selected connection.`,
     );
     let pending = '',
       totalBytes = 0,
@@ -354,7 +370,7 @@ export async function translateWithCodex(
         options.onStage?.({
           id: 'translation',
           percentage: null,
-          detail: `Codex is working on the complete subtitle file · ${Math.floor((Date.now() - started) / 1000)}s elapsed`,
+          detail: `Translation is running on the complete subtitle file · ${Math.floor((Date.now() - started) / 1000)}s elapsed`,
         }),
       )
         .catch(() => {})
@@ -363,23 +379,38 @@ export async function translateWithCodex(
         });
     }, 15000);
     try {
-      await run(settings.CODEX_BIN, codexArgs(workDir, candidateFile, settings.CODEX_MODEL), {
-        cwd: workDir,
-        input: evidence ? editorialPrompt(source, context, evidence) : codexPrompt(source, context),
-        signal: options.signal,
-        timeout: settings.CODEX_TRANSLATION_TIMEOUT_MS,
-        onStdout: (chunk) => {
-          totalBytes += chunk.length;
-          if (totalBytes > 8 * 1024 * 1024) throw new Error('Codex returned too much output');
-          pending += decoder.write(chunk);
-          let end: number;
-          while ((end = pending.indexOf('\n')) >= 0) {
-            event(pending.slice(0, end));
-            pending = pending.slice(end + 1);
-          }
-        },
-      });
-      event(pending + decoder.end());
+      if (settings.TRANSLATION_PROVIDER !== 'codex-local') {
+        const response = await responseTranslation(
+          evidence ? editorialPrompt(source, context, evidence) : codexPrompt(source, context),
+          settings,
+          options.signal,
+        );
+        await atomicWrite(candidateFile, response.text);
+        usage = response.usage;
+        completed = true;
+        Object.assign(receipt, { turnCompleted: true, usage });
+        await writeJson(receiptFile, receipt);
+      } else {
+        await run(settings.CODEX_BIN, codexArgs(workDir, candidateFile, settings.CODEX_MODEL), {
+          cwd: workDir,
+          input: evidence
+            ? editorialPrompt(source, context, evidence)
+            : codexPrompt(source, context),
+          signal: options.signal,
+          timeout: settings.CODEX_TRANSLATION_TIMEOUT_MS,
+          onStdout: (chunk) => {
+            totalBytes += chunk.length;
+            if (totalBytes > 8 * 1024 * 1024) throw new Error('Codex returned too much output');
+            pending += decoder.write(chunk);
+            let end: number;
+            while ((end = pending.indexOf('\n')) >= 0) {
+              event(pending.slice(0, end));
+              pending = pending.slice(end + 1);
+            }
+          },
+        });
+        event(pending + decoder.end());
+      }
       await eventWrites;
       if (!completed || failed)
         throw new Error(failureMessage || 'Codex did not complete the translation');
@@ -392,14 +423,14 @@ export async function translateWithCodex(
       // Do not publish provider stderr, reasoning, prompts or credentials in job logs.
       const detail = failureMessage || String(error.message);
       const reason = /usage.limit|rate.limit|quota|429/i.test(detail)
-        ? 'Your Codex usage allowance was reached.'
+        ? 'Your translation connection reached its usage allowance.'
         : /deadline/i.test(detail)
           ? 'The translation reached its time limit.'
           : /401|unauthorized|refresh.token|sign.in/i.test(detail)
-            ? 'The Codex login needs to be renewed.'
-            : 'Codex could not finish the complete subtitle file.';
+            ? 'Your translation connection needs to be renewed.'
+            : 'The selected provider could not finish the complete subtitle file.';
       throw new Error(
-        `${reason} No translation was published and no paid API fallback was used. Check Codex, then retry manually.`,
+        `${reason} No translation was published and no paid API fallback was used. Check the selected connection, then retry manually.`,
       );
     } finally {
       clearInterval(heartbeat);
@@ -422,7 +453,9 @@ export async function translateWithCodex(
       status: 'complete',
       outputHash: hash(candidate),
       usage,
-      model: settings.CODEX_MODEL || 'Codex CLI default',
+      model:
+        settings.CODEX_MODEL ||
+        (settings.TRANSLATION_PROVIDER === 'codex-local' ? 'Codex CLI default' : 'gpt-5.4'),
       cliVersion: status.version,
     };
     await writeJson(receiptFile, receipt);
@@ -442,8 +475,11 @@ export async function translateWithCodex(
   }
   await atomicWrite(output, checked.srt);
   const report = {
-    provider: 'codex-local',
-    billing: 'ChatGPT subscription allowance',
+    provider: settings.TRANSLATION_PROVIDER,
+    billing:
+      settings.TRANSLATION_PROVIDER === 'openai-api'
+        ? 'Your OpenAI API account'
+        : 'ChatGPT subscription allowance',
     model: receipt.model,
     cliVersion: receipt.cliVersion,
     usage: receipt.usage,

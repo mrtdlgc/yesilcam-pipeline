@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { at, jobId, readJson, serialized, writeJson } from './files.js';
+import { DATA_ROOT, jobId, readJson, serialized, writeJson } from './files.js';
+import path from 'node:path';
 import type { Job, QueueState, Settings } from '../../types/pipeline.js';
 
 // One server owns the volume. Keep its hot state in memory, small progress records
@@ -22,7 +23,11 @@ export class QueueStore {
     this.defaults = stored.settingsDefaults;
     for (const job of stored.jobs) {
       if (this.defaults) job.settings = { ...this.defaults, ...job.settings };
-      if (!job.logs) job.logs = await readJson(at('data', 'job-logs', `${jobId(job.id)}.json`), []);
+      if (!job.logs)
+        job.logs = await readJson(
+          path.join(DATA_ROOT, 'data', 'job-logs', `${jobId(job.id)}.json`),
+          [],
+        );
     }
     delete stored.settingsDefaults;
     return (this.value = stored);
@@ -41,7 +46,10 @@ export class QueueStore {
         const logs = JSON.stringify(job.logs ?? []);
         const hash = createHash('sha256').update(logs).digest('hex');
         if (this.logHashes.get(job.id) !== hash) {
-          await writeJson(at('data', 'job-logs', `${jobId(job.id)}.json`), job.logs ?? []);
+          await writeJson(
+            path.join(DATA_ROOT, 'data', 'job-logs', `${jobId(job.id)}.json`),
+            job.logs ?? [],
+          );
           this.logHashes.set(job.id, hash);
         }
         const { logs: _logs, settings, ...summary } = job;

@@ -257,3 +257,9 @@ are removed once the durable screening exists. Studio displays persistent media 
 remove screening copies without deleting corrections, and finished history can be archived.
 Diagnostic transcript text is omitted from stdout unless `LOG_TRANSCRIPT_TEXT=true` is explicitly
 set.
+
+# Hosted accounts
+
+This guide describes personal workspace deployment. For a public service with email/username
+registration, private user workspaces and BYOK, use [HOSTED.md](HOSTED.md) and `APP_MODE=hosted`.
+The owner-only Codex login below is not a billing fallback for hosted users.

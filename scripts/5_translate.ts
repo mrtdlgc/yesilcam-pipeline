@@ -19,8 +19,8 @@ export async function translateSrtFile(
   options: PipelineOptions = {},
 ) {
   const settings = { ...config, ...options.settings };
-  if (settings.TRANSLATION_PROVIDER !== 'codex-local')
-    throw new Error('Translation requires codex-local');
+  if (!['codex-local', 'openai-api', 'chatgpt-oauth'].includes(settings.TRANSLATION_PROVIDER))
+    throw new Error('Choose a supported translation connection');
   return translateWithCodex(
     input,
     outputPath,

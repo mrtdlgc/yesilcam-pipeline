@@ -1,6 +1,9 @@
 import { prepareLocalMedia } from './local-media.js';
 import { rememberLocalFile } from './local-files.js';
 const BASE = window.APP_BASE_PATH || '';
+const hosted = window.APP_HOSTED === true;
+const translationProvider = () =>
+  hosted ? $<HTMLSelectElement>('translationConnection').value : 'codex-local';
 function $<T extends HTMLElement = HTMLElement>(id: string): T {
   const node = document.getElementById(id);
   if (!node) throw new Error(`Missing interface element: ${id}`);
@@ -118,6 +121,7 @@ function languages() {
     priceCurrency: $<HTMLInputElement>('priceCurrency').value.trim().toUpperCase(),
     alignmentMethod: $<HTMLSelectElement>('alignmentMethod').value,
     pauseBeforeTranscription: String($<HTMLInputElement>('pauseBeforeTranscription').checked),
+    translationProvider: translationProvider(),
     translateWithCodex: String($<HTMLInputElement>('translateWithCodex').checked),
     keepIntermediates: String($<HTMLInputElement>('keepIntermediates').checked),
     codexModel: $<HTMLInputElement>('codexModel').value.trim(),
@@ -863,7 +867,18 @@ function renderSubtitleFiles(files: { filename: string }[]) {
   select.value = files.some((file) => file.filename === previous) ? previous : '';
 }
 async function loadCodexStatus() {
-  const status = await request('/api/codex');
+  const status = await request(`/api/codex?provider=${encodeURIComponent(translationProvider())}`);
+  if (hosted && status.oauth) {
+    for (const id of ['translationConnection', 'pipelineTranslationConnection']) {
+      const option = $<HTMLSelectElement>(id).querySelector<HTMLOptionElement>(
+        'option[value=chatgpt-oauth]',
+      )!;
+      option.disabled = !status.oauth.connected;
+      option.textContent = status.oauth.connected
+        ? 'My ChatGPT plan'
+        : 'My ChatGPT plan · connect when available';
+    }
+  }
   $('codexStatus').textContent = `${status.message}${status.version ? ` (${status.version})` : ''}`;
   $<HTMLButtonElement>('startCodexTranslation').disabled = !status.available;
   if (!$<HTMLInputElement>('codexModel').value && status.model)
@@ -924,6 +939,7 @@ function initializeCodexTranslations() {
         sourceLanguage: $<HTMLInputElement>('translationSourceLanguage').value.trim(),
         targetLanguage: $<HTMLInputElement>('translationTargetLanguage').value.trim(),
         model: $<HTMLInputElement>('codexModel').value.trim(),
+        translationProvider: translationProvider(),
         translationMode: $<HTMLSelectElement>('translationMode').value,
         songReferences: $<HTMLTextAreaElement>('songReferences').value.trim(),
       });
@@ -1442,10 +1458,16 @@ interface ConnectionField {
   configured: boolean;
   source: string;
   value?: string;
+  expires?: number | null;
 }
 async function loadConnections() {
   const { fields }: { fields: ConnectionField[] } = await request('/api/connections');
   const list = $('connectionsList');
+  if (hosted) {
+    const priority = (name: string) =>
+      name === 'ELEVENLABS_API_KEY' ? 0 : name === 'OPENAI_API_KEY' ? 1 : 2;
+    fields.sort((a, b) => priority(a.name) - priority(b.name));
+  }
   list.replaceChildren();
   for (const field of fields) {
     const cookies = field.name === 'YOUTUBE_COOKIES';
@@ -1454,7 +1476,9 @@ async function loadConnections() {
     const badge = element(
       'span',
       field.configured
-        ? `Saved${field.source === 'environment' ? ' in environment' : ''}`
+        ? field.source === 'session'
+          ? `This session · expires ${new Date(field.expires!).toLocaleTimeString()}`
+          : `Saved${field.source === 'environment' ? ' in environment' : ''}`
         : 'Not connected',
       `connection-badge${field.configured ? '' : ' missing'}`,
     );
@@ -1487,6 +1511,23 @@ async function loadConnections() {
           'field-note',
         ),
       );
+    const remember = element('input');
+    remember.type = 'checkbox';
+    remember.checked = field.source === 'saved';
+    const storageLabel = element('label', undefined, 'check-row');
+    storageLabel.append(
+      remember,
+      element('span', 'Remember this connection, encrypted on the server'),
+    );
+    if (hosted)
+      card.append(
+        storageLabel,
+        element(
+          'p',
+          'Otherwise it is held for this session, up to 12 hours. Signing out or a server restart removes temporary keys.',
+          'field-note',
+        ),
+      );
     const save = element('button', 'Save connection', 'btn-small');
     save.type = 'submit';
     save.disabled = !input.value.trim();
@@ -1499,7 +1540,9 @@ async function loadConnections() {
     const clear = button('Clear', async () => {
       if (
         !confirm(
-          `Remove ${field.label} from this workspace? This also disables any environment fallback.`,
+          hosted
+            ? `Disconnect ${field.label} from your account?`
+            : `Remove ${field.label} from this workspace? This also disables any environment fallback.`,
         )
       )
         return;
@@ -1510,6 +1553,7 @@ async function loadConnections() {
       badge.classList.add('missing');
       feedback.textContent = 'Removed. Future requests will use the updated connection.';
       await loadProviders(false);
+      await loadCodexStatus();
     });
     card.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -1518,17 +1562,21 @@ async function loadConnections() {
       try {
         await request(`/api/connections/${encodeURIComponent(field.name)}`, {
           method: 'PUT',
-          body: JSON.stringify({ value: input.value }),
+          body: JSON.stringify({
+            value: input.value,
+            storage: remember.checked ? 'saved' : 'session',
+          }),
         });
         if (field.secret) input.value = '';
         input.placeholder = field.secret
           ? 'Saved · enter a new value to replace'
           : input.placeholder;
-        badge.textContent = 'Saved';
+        badge.textContent = hosted && !remember.checked ? 'Connected for this session' : 'Saved';
         badge.classList.remove('missing');
         feedback.textContent =
           'Saved. Available immediately for the next request; no restart needed.';
         await loadProviders(false);
+        await loadCodexStatus();
       } catch (error) {
         feedback.textContent = error.message;
       } finally {
@@ -1540,11 +1588,64 @@ async function loadConnections() {
     list.append(card);
   }
 }
+async function loadChatGPTConnection() {
+  const status = await request('/api/oauth/chatgpt');
+  $('chatGPTConnectionStatus').textContent = status.connected
+    ? `Connected${status.email ? ' as ' + status.email : ''}. Translation uses your plan allowance.`
+    : status.message;
+  $<HTMLButtonElement>('connectChatGPT').disabled = !status.enabled || status.connected;
+  $('disconnectChatGPT').hidden = !status.connected;
+}
 function initializeWorkspace() {
+  if (hosted) {
+    document
+      .querySelectorAll<HTMLElement>('[data-personal-only]')
+      .forEach((node) => (node.hidden = true));
+    $('hostedTranslationOptions').hidden = false;
+    $('pipelineTranslationOptions').hidden = false;
+    $('chatGPTConnection').hidden = false;
+    $('translationBillingNote').textContent =
+      'Translation runs on the server using your selected provider connection. API charges are separate from ChatGPT subscriptions and transcription charges.';
+    $('pipelineTranslationLabel').textContent = 'Translate after transcription using my connection';
+    $('pipelineTranslationNote').textContent =
+      'The server uses your chosen translation account and preserves speaker turns and lyric styling.';
+    $('connectionStorageTitle').textContent = 'Your keys, scoped to your account';
+    $('queueControlStatus').textContent = 'Your own jobs and provider connections.';
+    const modelLabel = document.querySelector<HTMLLabelElement>('label[for=codexModel]')!;
+    modelLabel.textContent = 'Translation model';
+    $<HTMLInputElement>('codexModel').placeholder = 'gpt-5.4';
+    for (const id of ['translationConnection', 'pipelineTranslationConnection'])
+      $(id).addEventListener('change', () => {
+        const value = $<HTMLSelectElement>(id).value;
+        for (const other of ['translationConnection', 'pipelineTranslationConnection'])
+          $<HTMLSelectElement>(other).value = value;
+        void loadCodexStatus().catch((error) => notice(error.message));
+      });
+    void request('/api/auth/session').then((data) => {
+      $('accountIdentity').textContent = `${data.user.username} · ${data.user.email}`;
+    });
+    void loadChatGPTConnection().catch((error) => notice(error.message));
+    $('connectChatGPT').onclick = () => {
+      void post('/api/oauth/chatgpt/start', {
+        storage: $<HTMLInputElement>('rememberChatGPT').checked ? 'saved' : 'session',
+      })
+        .then((data) => window.location.assign(data.url))
+        .catch((error) => notice(error.message));
+    };
+    $('disconnectChatGPT').onclick = () => {
+      void request('/api/oauth/chatgpt', { method: 'DELETE' })
+        .then(async (data) => {
+          notice(data.message, true);
+          await loadChatGPTConnection();
+          await loadCodexStatus();
+        })
+        .catch((error) => notice(error.message));
+    };
+  }
   const views = new Set(['studio', 'library', 'translations', 'connections']);
   let connectionsLoaded = false;
   const show = (view: string) => {
-    if (!views.has(view)) view = 'studio';
+    if (!views.has(view) || (hosted && view === 'library')) view = 'studio';
     document.querySelectorAll<HTMLElement>('[data-screen]').forEach((screen) => {
       screen.hidden = screen.dataset.screen !== view;
     });

@@ -1,4 +1,5 @@
 interface Window {
+  APP_HOSTED: boolean;
   APP_BASE_PATH: string;
   APP_DEFAULT_LANGUAGE: string;
   APP_TARGET_LANGUAGE: string;

@@ -15,7 +15,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "docs:providers": "tsx scripts/generate-provider-docs.ts",
-    "test:browser": "npm run build && node scripts/tests/hybrid-browser.mjs"
+    "test:browser": "npm run build && node scripts/tests/hybrid-browser.mjs && node scripts/tests/hosted-browser.mjs"
   },
   "keywords": [
     "subtitles",
@@ -23,14 +23,15 @@
     "yesilcam"
   ],
   "author": "",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "dependencies": {
     "@openai/codex": "0.164.0",
     "dotenv": "18.0.9",
-    "express": "5.3.0"
+    "express": "5.3.0",
+    "jose": "6.2.13"
   },
   "engines": {
-    "node": ">=22.12 <27"
+    "node": ">=22.13 <27"
   },
   "devDependencies": {
     "@ffmpeg/core": "0.12.10",

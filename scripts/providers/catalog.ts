@@ -1,6 +1,7 @@
 import type { TranscriptionModel, Provider, Selection } from '../../types/providers.js';
 import type { Settings, Chunk } from '../../types/pipeline.js';
 import { DEFAULT_OPENROUTER_MODEL } from '../../config.js';
+import { hosted } from '../lib/identity.js';
 import { credential } from '../lib/credentials.js';
 import { readFileSync } from 'node:fs';
 import { fullMovie } from '../lib/transcription-mode.js';
@@ -271,7 +272,10 @@ export async function publicCatalog(settings: Settings) {
     providers: await Promise.all(
       providers.map(async (p) => ({
         ...p,
-        available: p.id !== 'local' || settings.LOCAL_WHISPER_ENABLED,
+        available:
+          hosted && ['local', 'compatible', 'auto'].includes(p.id)
+            ? false
+            : p.id !== 'local' || settings.LOCAL_WHISPER_ENABLED,
         configured:
           p.id === 'compatible'
             ? Boolean(await credential('TRANSCRIPTION_API_URL'))

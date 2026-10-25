@@ -2,6 +2,7 @@
 FROM node:24-bookworm-slim AS javascript
 WORKDIR /app
 COPY package.json package-lock.json ./
+COPY LICENSE ./
 RUN npm ci --ignore-scripts
 COPY tsconfig*.json config.ts server.ts ./
 COPY types ./types
@@ -43,6 +44,7 @@ RUN python -m venv /opt/audio \
     && if [ "$INSTALL_LOCAL_WHISPER" = "true" ]; then /opt/audio/bin/pip install --no-cache-dir --only-binary=:all: -r requirements-whisper.txt; fi
 COPY --from=javascript /usr/local/bin/node /usr/local/bin/node
 COPY --from=javascript /app/package.json ./package.json
+COPY --from=javascript /app/LICENSE ./LICENSE
 COPY --from=javascript /app/node_modules ./node_modules
 COPY --from=javascript /app/build ./build
 COPY --chmod=755 scripts/container-entrypoint.sh /usr/local/bin/yesilcam-entrypoint

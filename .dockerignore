@@ -2,6 +2,7 @@
 !Dockerfile
 !package.json
 !package-lock.json
+!LICENSE
 !tsconfig*.json
 !config.ts
 !server.ts
@@ -18,3 +19,7 @@
 **/*.local.*
 **/cookies*
 public/review-sessions/
+
+accounts
+**/*.sqlite
+**/*.sqlite-*

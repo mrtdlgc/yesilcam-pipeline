@@ -121,6 +121,8 @@ export interface PipelineOptions {
   threshold?: number;
 }
 export interface Job {
+  ownerId?: string;
+  credentialSessionId?: string;
   localMedia?: LocalMedia;
   localSubtitle?: {
     file: string;

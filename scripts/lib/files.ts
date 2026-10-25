@@ -5,14 +5,21 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
+import { identity } from './identity.js';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const PROJECT_ROOT = existsSync(path.join(ROOT, 'package.json')) ? ROOT : path.dirname(ROOT);
 export const DATA_ROOT = path.resolve(process.env.DATA_DIR || PROJECT_ROOT);
+export const workspaceRoot = () =>
+  identity() ? path.join(DATA_ROOT, 'accounts', identity()!.userId) : DATA_ROOT;
 const persistent = new Set(['data', 'temp', 'movies', 'found', 'output', 'review-sessions']);
 export const at = (...parts: string[]) =>
   path.join(
-    persistent.has(parts[0]?.split('/')[0]) ? DATA_ROOT : parts[0] === '.env' ? PROJECT_ROOT : ROOT,
+    persistent.has(parts[0]?.split('/')[0])
+      ? workspaceRoot()
+      : parts[0] === '.env'
+        ? PROJECT_ROOT
+        : ROOT,
     ...parts,
   );
 export function leaf(value: unknown): string {

@@ -10,6 +10,9 @@ import {
   clearCredential,
 } from './scripts/lib/credentials.js';
 import { initializePassword, installAuth } from './scripts/lib/auth.js';
+import { initializeAccounts, installAccounts, accountExists } from './scripts/lib/accounts.js';
+import { hosted, identity, asIdentity, owns } from './scripts/lib/identity.js';
+import { installChatGPT, chatGPTStatus } from './scripts/lib/chatgpt-oauth.js';
 import { acquireInstanceLock } from './scripts/lib/instance-lock.js';
 import path from 'node:path';
 import fs from 'node:fs/promises';
@@ -136,7 +139,8 @@ for (const dir of [
 const releaseLock = await acquireInstanceLock();
 await initializeCredentials();
 await clearStaleCookieFiles();
-await initializePassword();
+if (hosted) await initializeAccounts();
+else await initializePassword();
 const store = new QueueStore(at('data', 'processing-queue.json'), {
   version: 1,
   jobs: [],
@@ -153,6 +157,7 @@ const localAudioUploads = new Map<
     data: Awaited<ReturnType<typeof jobInput>>;
     media: ReturnType<typeof localMediaMetadata>;
     expires: number;
+    ownerId?: string;
   }
 >();
 let active: { id: string; controller: AbortController } | null = null;
@@ -173,6 +178,8 @@ await store.update(async (state) => {
     throw new Error('Unsupported queue format; preserve it and migrate explicitly');
   state.processed ??= {};
   queueControl(state);
+  if (hosted)
+    Object.assign(queueControl(state), { paused: false, reason: null, scannerEnabled: false });
   for (const job of state.jobs) {
     if (job.result?.reviewStatus === 'preparing') {
       job.result.reviewStatus = 'failed';
@@ -182,15 +189,17 @@ await store.update(async (state) => {
       if (stage) stage.status = 'interrupted';
     }
     if (job.status === 'processing') {
-      pauseQueue(
-        state,
-        'The server stopped during a job. Check the interrupted job before resuming the queue.',
-      );
+      if (!hosted)
+        pauseQueue(
+          state,
+          'The server stopped during a job. Check the interrupted job before resuming the queue.',
+        );
       job.status = 'interrupted';
       stopStages(job.stages, 'interrupted');
       job.error = 'Server stopped during processing. Resume or retry this job.';
       job.logs = [...(job.logs ?? []), { time: now(), message: job.error }].slice(-200);
     }
+    if (job.ownerId) continue; // Hosted checkpoints already use current settings and private workspaces.
     if (job.settings?.DEMUCS_ENABLED && job.status !== 'completed' && !job.intermediatesRemoved) {
       try {
         const manifest = await migratePreparedAudio(job.id);
@@ -255,7 +264,7 @@ for (const entry of await fs.readdir(at('temp'), { withFileTypes: true })) {
 async function updateJob<T>(id: string, mutate: (job: Job, state: QueueState) => T | Promise<T>) {
   return store.update((state) => {
     const job = state.jobs.find((item) => item.id === id);
-    if (!job) return fail(404, 'Job not found');
+    if (!job || (identity() && !owns(job))) return fail(404, 'Job not found');
     return mutate(job, state);
   });
 }
@@ -263,6 +272,9 @@ async function addJob(data: any) {
   const { transcriptionSettings, ...inputData } = data;
   const job: Job = {
     ...inputData,
+    ...(identity()
+      ? { ownerId: identity()!.userId, credentialSessionId: identity()!.sessionId }
+      : {}),
     pathSchema: 1,
     id: data.id ?? jobId(),
     status: 'queued',
@@ -281,9 +293,16 @@ async function addJob(data: any) {
   job.stages = createStages(job);
   const accepted = await store.update((state) => {
     const existing =
-      job.submissionKey && state.jobs.find((item) => item.submissionKey === job.submissionKey);
+      job.submissionKey &&
+      state.jobs.find((item) => owns(item) && item.submissionKey === job.submissionKey);
     if (existing) return structuredClone(existing);
     assertQueueCapacity(state);
+    if (
+      hosted &&
+      state.jobs.filter((item) => owns(item) && ['queued', 'processing'].includes(item.status))
+        .length >= 3
+    )
+      fail(429, 'You already have three active or waiting jobs');
     state.jobs.push(job);
     return job;
   });
@@ -292,7 +311,7 @@ async function addJob(data: any) {
 }
 function wake() {
   if (!stopping && !queueFault)
-    void pump().catch((error) => {
+    void asIdentity(undefined, () => pump()).catch((error) => {
       queueFault = error.message;
       console.error('Queue stopped:', error.message);
     });
@@ -321,7 +340,9 @@ async function prepareJobReview(job: Job, result: any, signal?: AbortSignal) {
       job.type === 'translation'
         ? (await store.read()).jobs.find(
             (item) =>
-              item.type !== 'translation' && item.result?.subtitleFile === result.subtitleFile,
+              owns(item) &&
+              item.type !== 'translation' &&
+              item.result?.subtitleFile === result.subtitleFile,
           )
         : undefined;
     Object.assign(
@@ -381,7 +402,9 @@ async function pump() {
       const controller = new AbortController();
       const job = await store.update((state) => {
         if (queueControl(state).paused) return null;
-        const item = state.jobs.find((j) => j.status === 'queued');
+        const item = state.jobs.find(
+          (j) => j.status === 'queued' && (!hosted || Boolean(j.ownerId)),
+        );
         if (!item) return null;
         item.status = 'processing';
         item.error = null;
@@ -391,97 +414,106 @@ async function pump() {
         return structuredClone(item);
       });
       if (!job) break;
-      const updates = progressWriter((mutate) => updateJob(job.id, mutate));
-      try {
-        const result = await runPipeline(job, {
-          signal: controller.signal,
-          resume: job.resume === true,
-          onStage: async (update) =>
-            updates.push(
-              (item) => {
-                item.stages ??= createStages(item);
-                applyStage(item.stages, update);
-              },
-              update.status !== undefined && update.status !== 'running',
-            ),
-          onWarning: async (message) =>
-            updateJob(job.id, (item) => {
-              item.logs = [
-                ...(item.logs ?? []),
-                { time: now(), message: String(message).slice(0, 4000) },
-              ].slice(-200);
-            }),
-          progress: async (progress, message) =>
-            updates.push((item) => {
-              item.progress = Math.min(100, Math.max(0, progress));
-              item.logs = [
-                ...(item.logs ?? []),
-                { time: now(), message: String(message).slice(0, 4000) },
-              ].slice(-200);
-            }),
-        });
-        await updates.flush();
-        await updateJob(job.id, (item, state) => {
-          item.status = result.paused ? 'paused' : 'completed';
-          item.result = result;
-          item.finishedAt = now();
-          item.resume = false;
-          if (item.sourceKey && !result.paused)
-            state.processed[item.sourceKey] = {
-              filename: path.basename(item.input ?? ''),
-              jobId: item.id,
-              at: now(),
-            };
-        });
-        if (!result.paused) {
-          if (job.settings.PREPARE_REVIEW !== false && !stopping)
-            await startReviewTask({ ...job, status: 'completed', result });
-          else if (job.settings.PREPARE_REVIEW === false) await cleanupSuccessfulJob(job);
-        }
-      } catch (error) {
-        await updates.flush();
-        const manifest = await readJson(at('temp', job.id, 'manifest.json'), null).catch(
-          () => null,
-        );
-        const reviewExists = await fs.access(at('output', 'reviews', `${job.id}.json`)).then(
-          () => true,
-          () => false,
-        );
-        const usageExists = await fs
-          .access(at('output', 'raw_transcriptions', job.id, 'usage.json'))
-          .then(
-            () => true,
-            () => false,
-          );
-        await updateJob(job.id, (item, state) => {
-          item.status = stopping
-            ? 'interrupted'
-            : controller.signal.aborted
-              ? 'cancelled'
-              : 'failed';
-          item.error = error.message;
-          stopStages(item.stages, item.status as 'interrupted' | 'cancelled' | 'failed');
-          item.finishedAt = now();
-          if (manifest?.partialResult) item.result = manifest.partialResult;
-          if (reviewExists)
-            item.result = { ...item.result, reviewFile: `/output/reviews/${job.id}.json` };
-          if (usageExists)
-            item.result = {
-              ...item.result,
-              usageFile: `/output/raw_transcriptions/${job.id}/usage.json`,
-            };
-          item.logs = [...(item.logs ?? []), { time: now(), message: error.message }].slice(-200);
-          if (config.PAUSE_ON_FAILURE && item.status === 'failed')
-            pauseQueue(state, `“${item.title}” failed: ${error.message}`);
-          if (item.status === 'interrupted')
-            pauseQueue(
-              state,
-              'A job was interrupted. Check its saved progress before resuming the queue.',
+      await asIdentity(
+        job.ownerId ? { userId: job.ownerId, sessionId: job.credentialSessionId } : undefined,
+        async () => {
+          const updates = progressWriter((mutate) => updateJob(job.id, mutate));
+          try {
+            if (hosted && (!job.ownerId || !accountExists(job.ownerId)))
+              throw new Error('The job account is unavailable');
+            const result = await runPipeline(job, {
+              signal: controller.signal,
+              resume: job.resume === true,
+              onStage: async (update) =>
+                updates.push(
+                  (item) => {
+                    item.stages ??= createStages(item);
+                    applyStage(item.stages, update);
+                  },
+                  update.status !== undefined && update.status !== 'running',
+                ),
+              onWarning: async (message) =>
+                updateJob(job.id, (item) => {
+                  item.logs = [
+                    ...(item.logs ?? []),
+                    { time: now(), message: String(message).slice(0, 4000) },
+                  ].slice(-200);
+                }),
+              progress: async (progress, message) =>
+                updates.push((item) => {
+                  item.progress = Math.min(100, Math.max(0, progress));
+                  item.logs = [
+                    ...(item.logs ?? []),
+                    { time: now(), message: String(message).slice(0, 4000) },
+                  ].slice(-200);
+                }),
+            });
+            await updates.flush();
+            await updateJob(job.id, (item, state) => {
+              item.status = result.paused ? 'paused' : 'completed';
+              item.result = result;
+              item.finishedAt = now();
+              item.resume = false;
+              if (item.sourceKey && !result.paused)
+                state.processed[item.sourceKey] = {
+                  filename: path.basename(item.input ?? ''),
+                  jobId: item.id,
+                  at: now(),
+                };
+            });
+            if (!result.paused) {
+              if (job.settings.PREPARE_REVIEW !== false && !stopping)
+                await startReviewTask({ ...job, status: 'completed', result });
+              else if (job.settings.PREPARE_REVIEW === false) await cleanupSuccessfulJob(job);
+            }
+          } catch (error) {
+            await updates.flush();
+            const manifest = await readJson(at('temp', job.id, 'manifest.json'), null).catch(
+              () => null,
             );
-        });
-      } finally {
-        active = null;
-      }
+            const reviewExists = await fs.access(at('output', 'reviews', `${job.id}.json`)).then(
+              () => true,
+              () => false,
+            );
+            const usageExists = await fs
+              .access(at('output', 'raw_transcriptions', job.id, 'usage.json'))
+              .then(
+                () => true,
+                () => false,
+              );
+            await updateJob(job.id, (item, state) => {
+              item.status = stopping
+                ? 'interrupted'
+                : controller.signal.aborted
+                  ? 'cancelled'
+                  : 'failed';
+              item.error = error.message;
+              stopStages(item.stages, item.status as 'interrupted' | 'cancelled' | 'failed');
+              item.finishedAt = now();
+              if (manifest?.partialResult) item.result = manifest.partialResult;
+              if (reviewExists)
+                item.result = { ...item.result, reviewFile: `/output/reviews/${job.id}.json` };
+              if (usageExists)
+                item.result = {
+                  ...item.result,
+                  usageFile: `/output/raw_transcriptions/${job.id}/usage.json`,
+                };
+              item.logs = [...(item.logs ?? []), { time: now(), message: error.message }].slice(
+                -200,
+              );
+              if (!hosted && config.PAUSE_ON_FAILURE && item.status === 'failed')
+                pauseQueue(state, `“${item.title}” failed: ${error.message}`);
+              if (!hosted && item.status === 'interrupted')
+                pauseQueue(
+                  state,
+                  'A job was interrupted. Check its saved progress before resuming the queue.',
+                );
+            });
+          } finally {
+            active = null;
+          }
+        },
+      );
     }
   } finally {
     pumping = false;
@@ -491,7 +523,7 @@ async function pump() {
       !stopping &&
       !queueFault &&
       !queueControl(state).paused &&
-      state.jobs.some((job) => job.status === 'queued')
+      state.jobs.some((job) => job.status === 'queued' && (!hosted || Boolean(job.ownerId)))
     )
       setImmediate(wake);
   }
@@ -520,7 +552,9 @@ app.use((req, res, next) => {
     return res.status(403).json({ error: 'Host does not match PUBLIC_ORIGIN' });
   if (req.headers.origin && req.headers.origin !== `${PUBLIC_ORIGIN.protocol}//${req.headers.host}`)
     return res.status(403).json({ error: 'Same-origin requests required' });
-  if (req.headers['sec-fetch-site'] === 'cross-site')
+  const oauthCallback =
+    hosted && req.method === 'GET' && req.path === `${BASE_PATH}/api/oauth/chatgpt/callback`;
+  if (req.headers['sec-fetch-site'] === 'cross-site' && !oauthCallback)
     return res.status(403).json({ error: 'Cross-site requests are disabled' });
   if (
     !['GET', 'HEAD', 'OPTIONS'].includes(req.method) &&
@@ -552,17 +586,60 @@ router.get('/app-config.js', (req, res) =>
   res
     .type('application/javascript')
     .send(
-      `window.APP_BASE_PATH=${JSON.stringify(BASE_PATH)};window.APP_DEFAULT_LANGUAGE=${JSON.stringify(config.DEFAULT_LANGUAGE)};window.APP_TARGET_LANGUAGE=${JSON.stringify(config.TARGET_LANGUAGE)};window.APP_MAX_UPLOAD_BYTES=${config.MAX_UPLOAD_BYTES};window.APP_MAX_INPUT_DURATION_SEC=${config.MAX_INPUT_DURATION_SEC};window.APP_AUDIO_STREAM_INDEX=${config.AUDIO_STREAM_INDEX};window.APP_MAX_MOVIE_AUDIO_BYTES=${config.MAX_MOVIE_AUDIO_BYTES};window.APP_KEEP_INTERMEDIATES=${config.KEEP_INTERMEDIATES};window.APP_TRANSLATION_ENABLED=${config.TRANSLATION_ENABLED};`,
+      `window.APP_HOSTED=${hosted};window.APP_BASE_PATH=${JSON.stringify(BASE_PATH)};window.APP_DEFAULT_LANGUAGE=${JSON.stringify(config.DEFAULT_LANGUAGE)};window.APP_TARGET_LANGUAGE=${JSON.stringify(config.TARGET_LANGUAGE)};window.APP_MAX_UPLOAD_BYTES=${config.MAX_UPLOAD_BYTES};window.APP_MAX_INPUT_DURATION_SEC=${config.MAX_INPUT_DURATION_SEC};window.APP_AUDIO_STREAM_INDEX=${config.AUDIO_STREAM_INDEX};window.APP_MAX_MOVIE_AUDIO_BYTES=${config.MAX_MOVIE_AUDIO_BYTES};window.APP_KEEP_INTERMEDIATES=${config.KEEP_INTERMEDIATES};window.APP_TRANSLATION_ENABLED=${config.TRANSLATION_ENABLED};`,
     ),
 );
+const sourceUrl = new URL(process.env.SOURCE_URL || 'https://github.com/mrtdlgc/yesilcam-pipeline');
+if (sourceUrl.protocol !== 'https:' || sourceUrl.username || sourceUrl.password)
+  throw new Error('SOURCE_URL must be a public HTTPS source location');
+router.get('/source', (_req, res) => res.redirect(sourceUrl.href));
 router.use('/api/auth', express.json({ limit: '8kb', strict: true }));
-router.use(installAuth(router, PUBLIC_ORIGIN, BASE_PATH));
+router.use(
+  hosted
+    ? installAccounts(router, PUBLIC_ORIGIN, BASE_PATH)
+    : installAuth(router, PUBLIC_ORIGIN, BASE_PATH),
+);
+const initializedWorkspaces = new Set<string>();
+router.use(async (req, res, next) => {
+  if (!hosted) return next();
+  const userId = identity()!.userId;
+  if (!initializedWorkspaces.has(userId)) {
+    for (const folder of [
+      'data',
+      'temp',
+      'found',
+      'output/subtitles',
+      'output/translation_chunks',
+      'output/reviews',
+      'output/raw_transcriptions',
+      'review-sessions',
+    ])
+      await fs.mkdir(at(folder), { recursive: true, mode: 0o700 });
+    initializedWorkspaces.add(userId);
+  }
+  if (req.path === '/api/queue/control' || req.path.startsWith('/api/movies/'))
+    return res
+      .status(403)
+      .json({ error: 'Server library controls are available only in personal installations' });
+
+  next();
+});
+
+// Express decodes route parameters before this guard, including percent-encoded IDs.
+router.param('id', async (req, res, next, value) => {
+  if (hosted && /^\/api\/(jobs|paused-jobs)\//.test(String(req.route.path))) {
+    const job = (await store.read()).jobs.find((item) => item.id === jobId(value));
+    if (!job || !owns(job)) return res.status(404).json({ error: 'Job not found' });
+  }
+  next();
+});
+
 router.get('/api/connections', async (req, res) => res.json({ fields: await credentialStatus() }));
 router.put(
   '/api/connections/:name',
   express.json({ limit: '300kb', strict: true }),
   async (req, res) => {
-    await saveCredential(String(req.params.name), req.body?.value);
+    await saveCredential(String(req.params.name), req.body?.value, req.body?.storage);
     res.json({ success: true });
   },
 );
@@ -598,7 +675,7 @@ async function jobInput(body: Record<string, any> = {}, deferProviders = false) 
     PAUSE_AFTER_DEMUCS: false,
     TRANSLATION_ENABLED: booleanOption(body.translateWithCodex, config.TRANSLATION_ENABLED),
     KEEP_INTERMEDIATES: booleanOption(body.keepIntermediates, config.KEEP_INTERMEDIATES),
-    TRANSLATION_PROVIDER: 'codex-local',
+    TRANSLATION_PROVIDER: body.translationProvider ?? config.TRANSLATION_PROVIDER,
     TRANSLATION_MODE: body.translationMode ?? config.TRANSLATION_MODE,
     TRANSLATION_SONG_REFERENCES: body.songReferences ?? '',
     CODEX_MODEL: body.codexModel ?? config.CODEX_MODEL,
@@ -636,6 +713,12 @@ async function jobInput(body: Record<string, any> = {}, deferProviders = false) 
         FILTER_HALLUCINATIONS: false,
       });
     validateSettings(settings);
+    if (
+      hosted &&
+      (settings.TRANSLATION_PROVIDER === 'codex-local' ||
+        ['local', 'compatible', 'auto'].includes(settings.TRANSCRIBE_BACKEND))
+    )
+      throw new Error('Choose your own hosted provider connection');
     if (!deferProviders) await assertPipelineProviders(settings);
   } catch (error) {
     fail(400, error.message);
@@ -663,6 +746,7 @@ router.post('/api/upload-audio', async (req, res) => {
     const uploadId =
       req.query.localUploadId === undefined ? null : jobId(String(req.query.localUploadId));
     const staged = uploadId ? localAudioUploads.get(uploadId) : null;
+    if (staged && hosted && staged.ownerId !== identity()!.userId) fail(404, 'Transfer not found');
     if (uploadId) {
       localAudioUploads.delete(uploadId);
       if (!staged || staged.expires < Date.now())
@@ -754,6 +838,7 @@ router.post('/api/upload-audio', async (req, res) => {
   }
 });
 router.use(express.json({ limit: '2mb', strict: true }));
+if (hosted) installChatGPT(router, PUBLIC_ORIGIN, BASE_PATH);
 // Keep large song notes and movie metadata out of upload URLs and proxy header limits.
 router.post('/api/local-audio', async (req, res) => {
   const data = await jobInput(req.body, true);
@@ -764,7 +849,12 @@ router.post('/api/local-audio', async (req, res) => {
   if (localAudioUploads.size >= 20)
     fail(429, 'Other local audio transfers are pending. Try again shortly.');
   const uploadId = jobId();
-  localAudioUploads.set(uploadId, { data, media, expires: Date.now() + 15 * 60 * 1000 });
+  localAudioUploads.set(uploadId, {
+    data,
+    media,
+    expires: Date.now() + 15 * 60 * 1000,
+    ownerId: identity()?.userId,
+  });
   res.status(201).json({ uploadId });
 });
 router.post('/api/local-subtitle-search', async (req, res) => {
@@ -832,7 +922,14 @@ router.post('/api/local-subtitles', async (req, res) => {
     if (!accepted) await fs.rm(directory, { recursive: true, force: true });
   }
 });
-router.get('/api/codex', async (req, res) => res.json(await codexStatus()));
+router.get('/api/codex', async (req, res) =>
+  res.json({
+    ...(await codexStatus({
+      settings: { TRANSLATION_PROVIDER: String(req.query.provider || config.TRANSLATION_PROVIDER) },
+    })),
+    ...(hosted ? { oauth: chatGPTStatus() } : {}),
+  }),
+);
 router.get('/api/subtitle-translations', async (req, res) => {
   const files = [];
   for (const item of await fs.readdir(at('output', 'subtitles'), { withFileTypes: true })) {
@@ -856,7 +953,7 @@ router.post('/api/subtitle-translations', async (req, res) => {
       DEFAULT_LANGUAGE: sourceLanguage,
       TARGET_LANGUAGE: targetLanguage,
       CODEX_MODEL: model,
-      TRANSLATION_PROVIDER: 'codex-local',
+      TRANSLATION_PROVIDER: req.body?.translationProvider ?? config.TRANSLATION_PROVIDER,
       TRANSLATION_MODE: req.body?.translationMode ?? 'fixed',
       TRANSLATION_SONG_REFERENCES: req.body?.songReferences ?? '',
     };
@@ -894,7 +991,10 @@ router.post('/api/subtitle-translations', async (req, res) => {
     let speakers, evidence;
     if (filename) {
       const original = (await store.read()).jobs.find(
-        (job) => job.type !== 'translation' && job.result?.subtitleFile === sourceSubtitleFile,
+        (job) =>
+          owns(job) &&
+          job.type !== 'translation' &&
+          job.result?.subtitleFile === sourceSubtitleFile,
       );
       if (original?.result?.speakerFile) {
         const saved = await readJson(
@@ -950,18 +1050,19 @@ router.post('/api/subtitle-translations', async (req, res) => {
     });
     const duplicate = (await store.read()).jobs.find(
       (job) =>
-        job.submissionKey === key ||
-        (!job.submissionKey &&
-          job.type === 'translation' &&
-          ['queued', 'processing', 'interrupted', 'failed'].includes(job.status) &&
-          job.input &&
-          (job as Job & { sourceSubtitleFile?: string }).sourceSubtitleFile ===
-            sourceSubtitleFile &&
-          job.settings.TARGET_LANGUAGE === targetLanguage &&
-          (job.settings.TRANSLATION_MODE ?? 'fixed') === settings.TRANSLATION_MODE &&
-          (job.settings.TRANSLATION_SONG_REFERENCES ?? '') ===
-            settings.TRANSLATION_SONG_REFERENCES &&
-          job.settings.CODEX_MODEL === model),
+        owns(job) &&
+        (job.submissionKey === key ||
+          (!job.submissionKey &&
+            job.type === 'translation' &&
+            ['queued', 'processing', 'interrupted', 'failed'].includes(job.status) &&
+            job.input &&
+            (job as Job & { sourceSubtitleFile?: string }).sourceSubtitleFile ===
+              sourceSubtitleFile &&
+            job.settings.TARGET_LANGUAGE === targetLanguage &&
+            (job.settings.TRANSLATION_MODE ?? 'fixed') === settings.TRANSLATION_MODE &&
+            (job.settings.TRANSLATION_SONG_REFERENCES ?? '') ===
+              settings.TRANSLATION_SONG_REFERENCES &&
+            job.settings.CODEX_MODEL === model)),
     );
     if (duplicate && req.body?.forceNew !== true) return { jobId: duplicate.id, existing: true };
     assertQueueCapacity(await store.read());
@@ -989,7 +1090,7 @@ router.post('/api/subtitle-translations', async (req, res) => {
         sourceLanguage,
         targetLanguage,
         transcriptionSettings: {
-          TRANSLATION_PROVIDER: 'codex-local',
+          TRANSLATION_PROVIDER: settings.TRANSLATION_PROVIDER,
           CODEX_MODEL: model,
           TRANSLATION_MODE: settings.TRANSLATION_MODE,
           TRANSLATION_SONG_REFERENCES: settings.TRANSLATION_SONG_REFERENCES,
@@ -1015,7 +1116,7 @@ router.get('/api/jobs', async (req, res) => {
   )
     fail(400, 'Use a limit of 1–200 and a nonnegative offset');
   const jobs = (await store.read()).jobs.filter(
-    (job) => req.query.type !== 'translation' || job.type === 'translation',
+    (job) => owns(job) && (req.query.type !== 'translation' || job.type === 'translation'),
   );
   const page = jobs
     .slice()
@@ -1081,7 +1182,7 @@ router.post('/api/jobs/clear', async (req, res) => {
   const result = await store.update(async (state) => {
     let count = 0;
     for (const job of state.jobs)
-      if (job.status === 'queued') {
+      if (owns(job) && job.status === 'queued') {
         job.status = 'cancelled';
         count++;
       }
@@ -1095,7 +1196,7 @@ router.post('/api/jobs/clear', async (req, res) => {
             throw error;
           },
         );
-        if (!terminal.has(job.status) || hasCache) retained.push(job);
+        if (!owns(job) || !terminal.has(job.status) || hasCache) retained.push(job);
       }
       state.jobs = retained;
     }
@@ -1111,6 +1212,7 @@ router.post('/api/jobs/archive', async (_req, res) => {
     const ids = new Set<string>();
     for (const job of state.jobs) {
       if (
+        !owns(job) ||
         !terminal.has(job.status) ||
         reviewTasks.has(job.id) ||
         (await fs.stat(at('temp', job.id)).catch(() => null))
@@ -1309,6 +1411,7 @@ async function retry(id: string | string[], maxEstimatedCost?: unknown, retryCod
     job.status = 'queued';
     job.error = null;
     job.codexRetry = retryCodex;
+    if (identity()) job.credentialSessionId = identity()!.sessionId;
   });
   wake();
 }
@@ -1347,7 +1450,7 @@ router.post('/api/paused-jobs/:id/configure', async (req, res) => {
 router.get('/api/paused-jobs', async (req, res) =>
   res.json({
     jobs: (await store.read()).jobs
-      .filter((j) => j.status === 'paused')
+      .filter((j) => owns(j) && j.status === 'paused')
       .map((j) => ({
         jobId: j.id,
         title: j.title,
@@ -1374,9 +1477,9 @@ router.post('/api/jobs/:id/cleanup', async (req, res) => {
   res.json({ success: true });
 });
 
-const translationsRoot = at('output', 'translation_chunks');
+const translationsRoot = () => at('output', 'translation_chunks');
 async function translationDetails(name: string) {
-  const folder = await contained(translationsRoot, leaf(name));
+  const folder = await contained(translationsRoot(), leaf(name));
   const manifest = await readJson(await contained(folder, 'manifest.json'));
   const chunks = [];
   for (const file of manifest.files) {
@@ -1396,7 +1499,7 @@ async function translationDetails(name: string) {
 }
 router.get('/api/translations', async (req, res) => {
   const folders = [];
-  for (const dir of await fs.readdir(translationsRoot, { withFileTypes: true })) {
+  for (const dir of await fs.readdir(translationsRoot(), { withFileTypes: true })) {
     if (!dir.isDirectory() || dir.name.startsWith('.')) continue;
     try {
       const data = await translationDetails(dir.name);
@@ -1421,7 +1524,7 @@ router.get('/api/translations/:folder', async (req, res) =>
   res.json(await translationDetails(req.params.folder)),
 );
 router.post('/api/translations/:folder/upload', async (req, res) => {
-  const folder = await contained(translationsRoot, req.params.folder);
+  const folder = await contained(translationsRoot(), req.params.folder);
   try {
     res.json({
       success: true,
@@ -1437,7 +1540,7 @@ router.post('/api/translations/:folder/upload', async (req, res) => {
   }
 });
 router.post('/api/translations/:folder/merge', async (req, res) => {
-  const folder = await contained(translationsRoot, req.params.folder);
+  const folder = await contained(translationsRoot(), req.params.folder);
   const manifest = await readJson(await contained(folder, 'manifest.json'));
   const filename = `${leaf(req.params.folder)}_${manifest.targetLanguage}.srt`;
   const output = await contained(at('output', 'subtitles'), filename);
@@ -1466,7 +1569,7 @@ router.post('/api/translations/:folder/merge', async (req, res) => {
 
 const videoExtensions = new Set(['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v']);
 async function scanMovies(manual = false) {
-  if (scanning || stopping) return;
+  if (hosted || scanning || stopping) return;
   scanning = true;
   try {
     const control = queueControl(await store.read());
@@ -1636,24 +1739,29 @@ router.get('/api/found', async (req, res) => {
   res.json(result);
 });
 router.get('/api/status', async (req, res) => {
-  const state = await store.read(),
-    pending = state.jobs.filter((job) => job.status === 'queued');
+  const state = await store.read();
+  state.jobs = state.jobs.filter(owns);
+  const pending = state.jobs.filter((job) => job.status === 'queued');
   const control = queueControl(state);
   res.json({
     scanner: {
-      active: !stopping && control.scannerEnabled,
+      active: !hosted && !stopping && control.scannerEnabled,
       interval: 60000,
-      moviesDir: at('movies'),
+      moviesDir: hosted ? '' : at('movies'),
       totalFiles: lastScanFiles.length,
-      processedCount: Object.keys(state.processed).length,
+      processedCount: hosted ? 0 : Object.keys(state.processed).length,
       pendingInDir: skippedFiles.filter((f) => f.reason.startsWith('Waiting')).length,
       error: scanError,
     },
     queue: {
       paused: control.paused || Boolean(queueFault),
-      reason: queueFault || control.reason,
+      reason: hosted
+        ? control.paused || queueFault
+          ? 'The server queue is temporarily paused'
+          : null
+        : queueFault || control.reason,
       maxQueuedJobs: config.MAX_QUEUED_JOBS,
-      isProcessing: Boolean(active),
+      isProcessing: state.jobs.some((job) => job.id === active?.id),
       pendingJobs: pending.length,
       pendingTitles: pending.slice(0, 20).map((j) => j.title),
       currentTitle: state.jobs.find((j) => j.id === active?.id)?.title,

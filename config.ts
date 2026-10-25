@@ -131,11 +131,11 @@ export const config = {
 
   // === Subtitle translation ===
   TRANSLATION_ENABLED: process.env.TRANSLATION_ENABLED === 'true',
-  TRANSLATION_PROVIDER: 'codex-local', // Local Codex CLI with ChatGPT login
+  TRANSLATION_PROVIDER: process.env.APP_MODE === 'hosted' ? 'openai-api' : 'codex-local',
   TRANSLATION_MODE: 'editorial', // New media jobs; uploaded SRT defaults to fixed timings
   TRANSLATION_SONG_REFERENCES: '', // Optional titles, performance notes or supplied lyric references
   CODEX_BIN: process.env.CODEX_BIN || 'codex',
-  CODEX_MODEL: process.env.CODEX_MODEL || '', // Empty uses the installed CLI default
+  CODEX_MODEL: process.env.CODEX_MODEL || (process.env.APP_MODE === 'hosted' ? 'gpt-5.4' : ''), // Empty uses the installed CLI default
   CODEX_TRANSLATION_TIMEOUT_MS: Number(process.env.CODEX_TRANSLATION_TIMEOUT_MS || 30 * 60 * 1000),
   TRANSLATION_CONTEXT_WINDOW: 5, // Sentences before/after for context
   TRANSLATION_BATCH_SIZE: 10, // Sentences per LLM request

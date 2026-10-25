@@ -1,21 +1,31 @@
 # Yeşilçam Revival
 
-A private subtitle studio for classic Turkish films: transcribe original audio with **ElevenLabs
-Scribe v2**, through OpenRouter for short requests or directly through ElevenLabs for a complete
-movie. Preserve word timings and speaker turns for contextual translation. Other providers remain
-selectable.
+A subtitle studio for films that deserve a wider audience. Prepare local movies in the browser,
+reuse embedded subtitles, and transcribe missing dialogue with **direct ElevenLabs Scribe v2**.
+Preserve word timings and speaker turns for contextual translation, then watch and correct the
+result. Other cloud transcription providers remain selectable.
 
-Source is versioned in the private
+Source is available under **AGPL-3.0-only** in the
 [GitHub repository](https://github.com/mrtdlgc/yesilcam-pipeline). Runtime media, credentials and
 account state are excluded. Historical implementation notes are in [docs/history](docs/history/).
 See [the Opus audit remediation record](AUDIT_FIXES.md).
 
+**Hosted service:** [email/username accounts and per-user BYOK](HOSTED.md), with temporary keys by
+default and optional encrypted persistence. Each user has private jobs and corrections. OpenAI API
+translation is available; ChatGPT subscription OAuth is prepared for later activation after provider
+approval. **Personal installation:** the existing shared-password workspace and local Codex
+subscription workflow remain available. [Hybrid media preparation](HYBRID_MEDIA.md) keeps local
+films, playback and waveforms on the viewer's computer.
+
 ## Deploy on Coolify
 
-Use the root [Dockerfile](Dockerfile), expose **3000**, and mount a persistent volume at
-**`/data`**. Set **`PUBLIC_ORIGIN`** to your HTTPS origin and **`APP_PASSWORD`** to a first-start
-password of at least 12 characters. Use one replica and **Consistent name (no rolling updates)** so
-the old queue owner stops before its replacement starts.
+For a personal installation, use the root [Dockerfile](Dockerfile), expose **3000**, and mount a
+persistent volume at **`/data`**. Set **`PUBLIC_ORIGIN`** to your HTTPS origin and
+**`APP_PASSWORD`** to a first-start password of at least 12 characters. Use one replica and
+**Consistent name (no rolling updates)** so the old queue owner stops before its replacement starts.
+
+For a hosted BYOK service, set `APP_MODE=hosted` and follow [HOSTED.md](HOSTED.md) instead of using
+a shared workspace password. Do not share the operator's provider credentials with hosted accounts.
 
 Sign in and save provider keys in **Connections**. Keys are encrypted on the backend and become
 available to the next request without rebuilding or restarting. The frontend, APIs, and downloads

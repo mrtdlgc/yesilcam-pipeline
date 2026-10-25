@@ -25,11 +25,38 @@
         <span class="login-footnote">PRESERVE THE VOICE. OPEN THE STORY.</span>
       </section>
       <section class="login-form-panel">
-        <span class="eyebrow">PRIVATE RESTORATION WORKSPACE</span>
-        <h2>Enter the studio.</h2>
+        <span class="eyebrow" id="loginEyebrow">PRIVATE RESTORATION WORKSPACE</span>
+        <h2 id="loginTitle">Enter the studio.</h2>
         <p>Your films, connections, and unfinished stories are waiting.</p>
+        <div id="accountModes" hidden>
+          <button type="button" class="btn-small" id="signInMode">Sign in</button>
+          <button type="button" class="btn-small" id="signUpMode">Create account</button>
+          <button type="button" class="btn-small" id="recoverMode">Recover account</button>
+        </div>
         <form id="loginForm">
-          <label for="password">Workspace password</label
+          <div id="loginIdentity" hidden>
+            <label for="login">Email or username</label
+            ><input id="login" autocomplete="username" maxlength="254" />
+          </div>
+          <div id="signupEmail" hidden>
+            <label for="email">Email</label
+            ><input id="email" type="email" autocomplete="email" maxlength="254" />
+          </div>
+          <div id="signupUsername" hidden>
+            <label for="username">Username</label
+            ><input
+              id="username"
+              autocomplete="username"
+              minlength="3"
+              maxlength="30"
+              pattern="[a-zA-Z0-9_]{3,30}"
+            />
+          </div>
+          <div id="recoverCode" hidden>
+            <label for="recoveryCode">Recovery code</label
+            ><input id="recoveryCode" autocomplete="off" maxlength="48" />
+          </div>
+          <label for="password" id="passwordLabel">Workspace password</label
           ><input
             id="password"
             name="password"
@@ -42,7 +69,22 @@
           </button>
           <p id="loginError" class="error-message" role="alert"></p>
         </form>
-        <small>Sessions last 12 hours. Credentials stay on the server.</small>
+        <section id="recoveryResult" hidden>
+          <h3>Save your recovery code</h3>
+          <p>
+            Store this code in your password manager. It is shown once and lets you reset your
+            password. Email recovery is not configured.
+          </p>
+          <textarea
+            id="newRecoveryCode"
+            readonly
+            aria-label="Your recovery code"
+            rows="3"
+          ></textarea>
+          <a id="continueLink" class="btn-primary" href="./">Continue to the studio</a>
+        </section>
+        <small id="sessionNote">Sessions last 12 hours. Credentials stay on the server.</small>
+        <p><a href="source">Source code · AGPL-3.0</a></p>
       </section>
     </main>
     <script src="app-config.js"></script>

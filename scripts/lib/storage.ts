@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { at, serialized } from './files.js';
+import { at, serialized, workspaceRoot } from './files.js';
 import { config } from '../../config.js';
 
 let reserved = 0;
@@ -25,37 +25,42 @@ export async function directoryBytes(dir: string): Promise<number> {
   return bytes;
 }
 
-let snapshot:
-  | Promise<{
+const snapshots = new Map<
+  string,
+  {
+    at: number;
+    value: Promise<{
       temporaryBytes: number;
       availableBytes: number;
       screeningBytes: number;
       transcriptBytes: number;
       correctionBytes: number;
-    }>
-  | undefined;
-let snapshotAt = 0;
-export function storageStatus() {
-  if (!snapshot || Date.now() - snapshotAt > 10000) {
-    snapshotAt = Date.now();
-    snapshot = Promise.all([
-      directoryBytes(at('temp')),
-      fs.statfs(at('temp')),
-      directoryBytes(at('review-sessions')),
-      directoryBytes(at('output', 'raw_transcriptions')),
-      directoryBytes(at('data', 'subtitle-reviews')),
-    ]).then(([temporaryBytes, disk, screeningBytes, transcriptBytes, correctionBytes]) => ({
-      temporaryBytes,
-      availableBytes: disk.bavail * disk.bsize,
-      screeningBytes,
-      transcriptBytes,
-      correctionBytes,
-    }));
-    void snapshot.catch(() => {
-      snapshot = undefined;
-    });
+    }>;
   }
-  return snapshot;
+>();
+export function storageStatus() {
+  const key = workspaceRoot(),
+    saved = snapshots.get(key);
+  if (saved && Date.now() - saved.at < 10000) return saved.value;
+  const value = Promise.all([
+    directoryBytes(at('temp')),
+    fs.statfs(at('temp')),
+    directoryBytes(at('review-sessions')),
+    directoryBytes(at('output', 'raw_transcriptions')),
+    directoryBytes(at('data', 'subtitle-reviews')),
+  ]).then(([temporaryBytes, disk, screeningBytes, transcriptBytes, correctionBytes]) => ({
+    temporaryBytes,
+    availableBytes: disk.bavail * disk.bsize,
+    screeningBytes,
+    transcriptBytes,
+    correctionBytes,
+  }));
+  if (snapshots.size >= 1000) snapshots.delete(snapshots.keys().next().value!);
+  snapshots.set(key, { at: Date.now(), value });
+  void value.catch(() => {
+    if (snapshots.get(key)?.value === value) snapshots.delete(key);
+  });
+  return value;
 }
 
 export async function withTempBudget(bytes: number, action: any, settings = config) {

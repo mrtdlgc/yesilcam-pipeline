@@ -33,3 +33,8 @@ __pycache__/
 Thumbs.db
 .vscode/
 .idea/
+
+# Hosted accounts and databases
+accounts/
+*.sqlite
+*.sqlite-*

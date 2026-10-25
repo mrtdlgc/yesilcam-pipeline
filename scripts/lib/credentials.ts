@@ -3,6 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { at, atomicWrite, readJson, serialized, writeJson } from './files.js';
+import { hosted, identity } from './identity.js';
+import { accountDatabase, onSessionRevoked, sessionValid, SESSION_MS } from './accounts.js';
 
 export const credentialFields = [
   ['OPENROUTER_API_KEY', 'OpenRouter', true],
@@ -39,6 +41,111 @@ const directory = at('data', 'private');
 const vaultFile = path.join(directory, 'credentials.json');
 const keyFile = path.join(directory, 'master.key');
 let masterKey: Buffer | undefined;
+const temporary = new Map<string, { envelope: Envelope; sessionId: string; expires: number }>();
+onSessionRevoked((id) => {
+  for (const [key, value] of temporary) if (value.sessionId === id) temporary.delete(key);
+});
+const expiryTimer = setInterval(() => {
+  for (const [key, value] of temporary) if (value.expires <= Date.now()) temporary.delete(key);
+}, 60000);
+expiryTimer.unref();
+const accountScope = () => {
+  const value = identity();
+  if (!value)
+    throw Object.assign(new Error('An account is required for this connection'), { status: 401 });
+  return value;
+};
+export function sealConnection(name: string, text: string): Envelope {
+  if (!masterKey) throw new Error('Credential encryption is not initialized');
+  const iv = randomBytes(12),
+    cipher = createCipheriv('aes-256-gcm', masterKey, iv);
+  cipher.setAAD(Buffer.from(`${accountScope().userId}:${name}`));
+  const data = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
+  return {
+    iv: iv.toString('base64'),
+    tag: cipher.getAuthTag().toString('base64'),
+    data: data.toString('base64'),
+    updatedAt: new Date().toISOString(),
+  };
+}
+function unsealConnection(name: string, value: Envelope) {
+  if (!masterKey) throw new Error('Credential encryption is not initialized');
+  const decipher = createDecipheriv('aes-256-gcm', masterKey, Buffer.from(value.iv, 'base64'));
+  decipher.setAAD(Buffer.from(`${accountScope().userId}:${name}`));
+  decipher.setAuthTag(Buffer.from(value.tag, 'base64'));
+  return Buffer.concat([
+    decipher.update(Buffer.from(value.data, 'base64')),
+    decipher.final(),
+  ]).toString('utf8');
+}
+export function accountConnection(
+  name: string,
+): { value: string; mode: 'session' | 'saved'; expires: number | null; updatedAt: string } | null {
+  const scope = accountScope(),
+    key = `${scope.userId}:${scope.sessionId}:${name}`;
+  const value = temporary.get(key);
+  if (
+    value &&
+    value.expires > Date.now() &&
+    scope.sessionId &&
+    sessionValid(scope.sessionId, scope.userId)
+  )
+    return {
+      value: unsealConnection(name, value.envelope),
+      mode: 'session',
+      expires: value.expires,
+      updatedAt: value.envelope.updatedAt,
+    };
+  temporary.delete(key);
+  const row = accountDatabase()
+    .prepare('SELECT envelope FROM connections WHERE user_id = ? AND name = ?')
+    .get(scope.userId, name);
+  if (!row) return null;
+  const envelope = JSON.parse(String(row.envelope)) as Envelope;
+  return {
+    value: unsealConnection(name, envelope),
+    mode: 'saved',
+    expires: null,
+    updatedAt: envelope.updatedAt,
+  };
+}
+export function saveAccountConnection(name: string, text: string, mode: unknown = 'session') {
+  if (!['session', 'saved'].includes(String(mode)))
+    throw Object.assign(new Error('Choose session or saved storage'), { status: 400 });
+  const scope = accountScope(),
+    envelope = sealConnection(name, text);
+  if (mode === 'session') {
+    if (!scope.sessionId || !sessionValid(scope.sessionId, scope.userId))
+      throw Object.assign(new Error('Sign in again before connecting a provider'), { status: 401 });
+    // Replacing a remembered key with a temporary one must not resurrect the old key later.
+    accountDatabase()
+      .prepare('DELETE FROM connections WHERE user_id = ? AND name = ?')
+      .run(scope.userId, name);
+    if (temporary.size >= 20000)
+      throw Object.assign(new Error('Temporary connection capacity reached'), { status: 429 });
+    temporary.set(`${scope.userId}:${scope.sessionId}:${name}`, {
+      envelope,
+      sessionId: scope.sessionId,
+      expires: Date.now() + SESSION_MS,
+    });
+  } else {
+    accountDatabase()
+      .prepare(
+        `INSERT INTO connections VALUES (?, ?, ?, ?)
+      ON CONFLICT(user_id, name) DO UPDATE SET envelope=excluded.envelope, updated=excluded.updated`,
+      )
+      .run(scope.userId, name, JSON.stringify(envelope), Date.now());
+    temporary.delete(`${scope.userId}:${scope.sessionId}:${name}`);
+  }
+}
+export function clearAccountConnection(name: string) {
+  const scope = accountScope();
+  accountDatabase()
+    .prepare('DELETE FROM connections WHERE user_id = ? AND name = ?')
+    .run(scope.userId, name);
+  for (const key of temporary.keys())
+    if (key.startsWith(`${scope.userId}:`) && key.endsWith(`:${name}`)) temporary.delete(key);
+}
 
 export function credentialName(name: string): CredentialName {
   if (!credentialFields.some((field) => field[0] === name))
@@ -66,13 +173,17 @@ export async function initializeCredentials(): Promise<void> {
     if (error.code !== 'ENOENT') throw error;
     // Never silently replace a lost encryption key for an existing vault.
     if (
-      await fs.stat(vaultFile).then(
-        () => true,
-        (failure) => {
-          if (failure.code === 'ENOENT') return false;
-          throw failure;
-        },
-      )
+      await Promise.all(
+        [vaultFile, path.join(directory, 'accounts.sqlite')].map((file) =>
+          fs.stat(file).then(
+            () => true,
+            (failure) => {
+              if (failure.code === 'ENOENT') return false;
+              throw failure;
+            },
+          ),
+        ),
+      ).then((values) => values.some(Boolean))
     )
       throw new Error('Credential encryption key is missing; restore data/private from backup');
     const candidate = randomBytes(32);
@@ -107,6 +218,7 @@ async function readVault(): Promise<Vault> {
 export async function credential(name: string | null): Promise<string | undefined> {
   if (!name) return undefined;
   const field = credentialName(name);
+  if (hosted) return identity() ? accountConnection(field)?.value : undefined;
   const vault = await readVault();
   const value = vault.values[field];
   // A clear action masks an old environment key, instead of resurrecting it.
@@ -122,6 +234,25 @@ export async function credential(name: string | null): Promise<string | undefine
   ]).toString('utf8');
 }
 export async function credentialStatus() {
+  if (hosted)
+    return credentialFields
+      .filter(
+        ([name]) =>
+          !['TRANSCRIPTION_API_URL', 'TRANSCRIPTION_API_KEY', 'YOUTUBE_COOKIES'].includes(name),
+      )
+      .map(([name, label, secret]) => {
+        const connection = accountConnection(name);
+        return {
+          name,
+          label,
+          secret,
+          configured: Boolean(connection),
+          source: connection?.mode ?? 'missing',
+          updatedAt: connection?.updatedAt ?? null,
+          expires: connection?.expires ?? null,
+          value: secret ? undefined : (connection?.value ?? ''),
+        };
+      });
   const vault = await readVault();
   return Promise.all(
     credentialFields.map(async ([name, label, secret]) => ({
@@ -183,9 +314,22 @@ function validateValue(name: CredentialName, value: unknown): string {
   }
   return text;
 }
-export async function saveCredential(name: string, value: unknown): Promise<void> {
+export async function saveCredential(
+  name: string,
+  value: unknown,
+  mode: unknown = 'session',
+): Promise<void> {
   const field = credentialName(name),
     text = validateValue(field, value);
+  if (hosted) {
+    if (['TRANSCRIPTION_API_URL', 'TRANSCRIPTION_API_KEY', 'YOUTUBE_COOKIES'].includes(field))
+      throw Object.assign(
+        new Error('This connection is available only in personal installations'),
+        { status: 403 },
+      );
+    saveAccountConnection(field, text, mode);
+    return;
+  }
   if (!masterKey) await initializeCredentials();
   await serialized(vaultFile, async () => {
     const vault = await readVault(),
@@ -204,6 +348,10 @@ export async function saveCredential(name: string, value: unknown): Promise<void
 }
 export async function clearCredential(name: string): Promise<void> {
   const field = credentialName(name);
+  if (hosted) {
+    clearAccountConnection(field);
+    return;
+  }
   await serialized(vaultFile, async () => {
     const vault = await readVault();
     vault.values[field] = null;

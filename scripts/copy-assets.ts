@@ -23,6 +23,10 @@ await fs.copyFile(
   path.join(project, 'transcription-matrix.example.json'),
   path.join(project, 'build', 'transcription-matrix.example.json'),
 );
+await fs.copyFile(
+  path.join(project, 'LICENSE'),
+  path.join(project, 'build', 'public', 'licenses', 'AGPL-3.0.txt'),
+);
 // Pinned, same-origin browser engine. No CDN or user media requests leave the app.
 for (const [name, directory] of [
   ['ffmpeg', 'ffmpeg-0.12.15'],

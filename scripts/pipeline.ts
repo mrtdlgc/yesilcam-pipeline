@@ -6,7 +6,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import {
   at,
-  DATA_ROOT,
+  workspaceRoot,
   jobId as validateId,
   titleSlug,
   readJson,
@@ -58,7 +58,7 @@ export function validateSettings(settings: Settings) {
       /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(settings.TRANSLATION_SONG_REFERENCES))
   )
     throw new Error('Song reference notes must be text of at most 8,000 characters');
-  if (!['codex-local'].includes(settings.TRANSLATION_PROVIDER))
+  if (!['codex-local', 'openai-api', 'chatgpt-oauth'].includes(settings.TRANSLATION_PROVIDER))
     throw new Error('Unknown translation provider');
   if (
     typeof settings.CODEX_MODEL !== 'string' ||
@@ -231,7 +231,7 @@ export async function postprocessRecords(
 }
 
 function publicFile(file: string) {
-  return `/${path.relative(DATA_ROOT, file).split(path.sep).map(encodeURIComponent).join('/')}`;
+  return `/${path.relative(workspaceRoot(), file).split(path.sep).map(encodeURIComponent).join('/')}`;
 }
 
 async function reuseSubtitles(manifest: any, existing: ExistingSubtitle | null, options: any) {

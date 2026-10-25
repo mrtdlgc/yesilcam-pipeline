@@ -21,7 +21,9 @@
           <button class="nav-item active" data-view="studio" aria-current="page">
             <span>01</span> Studio
           </button>
-          <button class="nav-item" data-view="library"><span>02</span> Film library</button>
+          <button class="nav-item" data-personal-only data-view="library">
+            <span>02</span> Film library
+          </button>
           <button class="nav-item" data-view="translations"><span>03</span> Translations</button>
           <button class="nav-item" data-view="connections"><span>04</span> Connections</button>
         </nav>
@@ -247,12 +249,23 @@
               </div>
               <label class="check-row"
                 ><input id="translateWithCodex" type="checkbox" /><span>
-                  Translate with server Codex after transcription<small>
+                  <span id="pipelineTranslationLabel"
+                    >Translate with server Codex after transcription</span
+                  ><small id="pipelineTranslationNote">
                     Translates complete exchanges, follows speaker turns and marks uncertain lyrics
                     for review. Uses the server owner’s Codex subscription.
                   </small></span
                 ></label
               >
+              <div id="pipelineTranslationOptions" hidden>
+                <label for="pipelineTranslationConnection">Translation connection</label
+                ><select id="pipelineTranslationConnection">
+                  <option value="openai-api">My OpenAI API key</option>
+                  <option value="chatgpt-oauth" disabled>
+                    My ChatGPT plan · awaiting activation
+                  </option>
+                </select>
+              </div>
               <label for="pipelineTranslationMode">Subtitle editing</label>
               <select id="pipelineTranslationMode">
                 <option value="editorial">Editorial — natural cues and selective lyrics</option>
@@ -302,7 +315,9 @@
                 <h2 id="jobs-title">The cutting room</h2>
               </div>
               <div class="header-actions">
-                <button id="queueControlBtn" class="btn-small">Pause queue</button>
+                <button data-personal-only id="queueControlBtn" class="btn-small">
+                  Pause queue
+                </button>
                 <button id="pruneHistoryBtn" class="btn-small btn-secondary">
                   Archive finished history
                 </button>
@@ -339,7 +354,7 @@
               copying before queuing it.
             </p>
           </div>
-          <section class="panel scanner-section">
+          <section data-personal-only class="panel scanner-section">
             <div class="section-header">
               <h2>Film library</h2>
               <div class="header-actions">
@@ -398,10 +413,23 @@
               <button id="refreshTranslationsBtn" class="btn-small">Refresh</button>
             </div>
             <p id="codexStatus" class="provider-note" role="status">Checking server Codex…</p>
-            <p class="field-note">
+            <p class="field-note" id="translationBillingNote">
               Uses the ChatGPT account signed into Codex on the server. Your computer prepares media
               and plays the film; the server handles translation.
             </p>
+            <div id="hostedTranslationOptions" hidden>
+              <label for="translationConnection">Translation connection</label>
+              <select id="translationConnection">
+                <option value="openai-api">My OpenAI API key</option>
+                <option value="chatgpt-oauth" disabled>
+                  My ChatGPT plan · awaiting activation
+                </option>
+              </select>
+              <p class="field-note">
+                Applies to new movie jobs and subtitle translations. API translation is billed
+                separately from transcription.
+              </p>
+            </div>
             <form id="codexTranslationForm">
               <label for="translationSource">Complete subtitles from your library</label>
               <p class="field-note">
@@ -493,15 +521,30 @@
             <p>Save a key once. Use it for the next request. No restart, no rebuild.</p>
           </div>
           <div class="connection-explainer">
-            <strong>Stored privately on your server</strong>
+            <strong id="connectionStorageTitle">Stored privately on your server</strong>
             <p>
               Secret values are encrypted and never sent back to this page. A saved key has not been
               tested against its provider. Blank fields keep the existing value; Clear removes it.
             </p>
           </div>
+          <section id="chatGPTConnection" class="panel" hidden>
+            <h2>ChatGPT subscription</h2>
+            <p id="chatGPTConnectionStatus" role="status"></p>
+            <label class="check-row"
+              ><input id="rememberChatGPT" type="checkbox" /><span
+                >Remember this connection, encrypted on the server</span
+              ></label
+            >
+            <button id="connectChatGPT" class="btn-small" disabled>Continue with ChatGPT</button>
+            <button id="disconnectChatGPT" class="btn-small" hidden>Disconnect</button>
+            <a href="https://chatgpt.com/#settings/Usage" target="_blank" rel="noopener noreferrer"
+              >Manage ChatGPT usage</a
+            >
+          </section>
+          <p id="accountIdentity" class="field-note"></p>
           <div id="connectionsList" class="connections-grid" aria-live="polite"></div>
           <section class="panel account-panel">
-            <h2>Workspace password</h2>
+            <h2>Account password</h2>
             <p>Changing it signs out every browser session.</p>
             <form id="passwordForm">
               <div class="field-pair">
@@ -531,7 +574,7 @@
           </section>
         </section>
         <footer class="workspace-footer">
-          <span>YEŞİLÇAM REVIVAL</span><span>Made for the love of cinema.</span>
+          <span>YEŞİLÇAM REVIVAL</span><a href="source">Source code · AGPL-3.0</a>
         </footer>
       </main>
     </div>
