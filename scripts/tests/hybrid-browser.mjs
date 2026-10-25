@@ -234,7 +234,7 @@ try {
   await editor.locator('#playPause').click();
   assert.equal(
     await editor.evaluate(() => document.querySelector('#prepareLocalScreening').hidden),
-    true,
+    false,
   );
   await editor.locator('#targetText').fill('Saved in the VPS');
   await editor.locator('#targetText').dispatchEvent('input');
@@ -257,6 +257,74 @@ try {
     'PASS: embedded extraction, server translation, automatic local playback, local waveform and wrong-file protection',
   );
   await editor.locator('#workspace').screenshot({ path: '/tmp/yesilcam-hybrid-editor-brave.png' });
+  const multi = path.join(root, 'multiple-audio.mkv');
+  await run('ffmpeg', [
+    '-v',
+    'error',
+    '-i',
+    movie,
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=900:duration=8',
+    '-map',
+    '0:v',
+    '-map',
+    '0:a',
+    '-map',
+    '1:a',
+    '-map',
+    '0:s',
+    '-c:v',
+    'copy',
+    '-c:a',
+    'aac',
+    '-c:s',
+    'copy',
+    '-disposition:a:0',
+    '0',
+    '-disposition:a:1',
+    'default',
+    multi,
+  ]);
+  await page.locator('#uploadTitle').fill('Selected soundtrack fixture');
+  await page.locator('#audioFileInput').setInputFiles(multi);
+  await page
+    .locator('#notice')
+    .filter({ hasText: 'Subtitle track sent' })
+    .waitFor({ timeout: 30000 });
+  let multiJob;
+  for (let i = 0; i < 80; i++) {
+    multiJob = (await (await page.request.get(`${origin}/api/jobs`)).json()).find(
+      (job) => job.title === 'Selected soundtrack fixture',
+    );
+    if (multiJob?.result?.reviewStatus === 'ready') break;
+    await page.waitForTimeout(100);
+  }
+  assert.equal(multiJob?.localMedia?.requiresLocalScreening, true);
+  const multiEditor = await context.newPage();
+  await multiEditor.goto(`${origin}/review-player.html?job=${multiJob.id}`);
+  await multiEditor
+    .locator('#localPreparationStatus')
+    .filter({ hasText: 'selected soundtrack' })
+    .waitFor();
+  assert.equal(
+    await multiEditor.locator('#film').getAttribute('src'),
+    null,
+    'do not play the wrong default soundtrack',
+  );
+  await multiEditor.locator('#prepareLocalScreening').click();
+  await multiEditor
+    .locator('#localPreparationStatus')
+    .filter({ hasText: 'Local screening ready' })
+    .waitFor({ timeout: 30000 });
+  await multiEditor.evaluate(() => {
+    document.querySelector('#film').muted = true;
+  });
+  await multiEditor.locator('#playPause').click();
+  await multiEditor.waitForFunction(() => document.querySelector('#film').currentTime > 0.3);
+  await multiEditor.close();
+  console.log('PASS: non-default soundtrack is prepared locally before playback');
   await page.locator('#pauseBeforeTranscription').check();
   await page.locator('#uploadTitle').fill('Browser audio fixture');
   await page.locator('#audioFileInput').setInputFiles(bare);

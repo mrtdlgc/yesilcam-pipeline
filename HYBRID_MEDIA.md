@@ -34,11 +34,13 @@ Studio tab. Movies are never copied into IndexedDB. After closing the tabs or re
 browser, choose the matching local movie again. Size and a sampled content hash catch selecting
 another cut; this edition check is not a full-file integrity hash.
 
-Compatible movies play through a local Blob URL. For an unsupported codec, **Prepare local screening
-copy** makes a 480p H.264/AAC MP4 on the user's computer. This optional operation can be slow on
-long films and has a cancel button. **Save local screening copy** downloads it locally for reuse;
-its embedded identity and duration are checked when reopening it. There is no automatic full-movie
-upload fallback.
+Compatible movies play through a local Blob URL. A non-default selected soundtrack or unsupported
+audio codec requires a local copy, preventing silent or wrong-track playback. The copy action is
+also available if native playback has picture/sound problems. **Prepare local screening copy** makes
+a 480p H.264/AAC MP4 on the user's computer. This optional operation can be slow on long films and
+has a cancel button. **Save local screening copy** downloads it locally for reuse; its embedded
+identity and duration are checked when reopening it. There is no automatic full-movie upload
+fallback.
 
 Waveforms decode audio in two-minute windows into 10 ms peak/RMS bins. IndexedDB caches only the
 compact waveform, not the movie or PCM. Delayed audio, silence and chunk boundaries stay on the

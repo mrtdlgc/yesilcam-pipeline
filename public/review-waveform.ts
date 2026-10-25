@@ -340,7 +340,7 @@ export function startWaveform(options: Options) {
       if (stopped) return;
       peaks = rms = new Uint8Array(0);
       $('waveformStatus').textContent =
-        `Waveform unavailable: ${error.message} Timing controls still work.`;
+        `Waveform unavailable: ${error?.message ?? String(error)} Timing controls still work.`;
       $('waveformRetry').hidden = false;
     } finally {
       loading = false;

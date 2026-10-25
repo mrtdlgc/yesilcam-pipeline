@@ -678,20 +678,35 @@ export async function startEditor(id: string) {
       waveformController?.abort();
       localFile = file;
       localInfo = info;
+      $('downloadLocalScreening').hidden = true;
       rememberLocalFile(id, file);
       $('localMediaControl').hidden = false;
+      if (info.requiresLocalScreening) {
+        video.pause();
+        if (localUrl) URL.revokeObjectURL(localUrl);
+        localUrl = '';
+        video.removeAttribute('src');
+        video.load();
+        $('prepareLocalScreening').hidden = false;
+        localProgress(
+          'Prepare a local screening copy to play the selected soundtrack reliably. The movie stays here.',
+        );
+        waveform?.reload();
+        return;
+      }
     }
     if (localUrl) URL.revokeObjectURL(localUrl);
     localUrl = URL.createObjectURL(file);
     video.src = localUrl;
-    $('prepareLocalScreening').hidden = true;
+    $('prepareLocalScreening').hidden = !document.localMedia;
     localProgress('Playing your local file. No screening video is uploaded.');
     status('Using your local film for playback. Subtitle corrections still save to the server.');
     waveform?.reload();
   }
   input('localMedia').onchange = () => {
     const file = input('localMedia').files?.[0];
-    if (file) void useLocalFile(file).catch((error) => localProgress(error.message));
+    if (file)
+      void useLocalFile(file).catch((error) => localProgress(error?.message ?? String(error)));
   };
   $('prepareLocalScreening').onclick = () => {
     if (!localFile || !localInfo || localController) return;
@@ -719,7 +734,9 @@ export async function startEditor(id: string) {
       })
       .catch((error) =>
         localProgress(
-          controller.signal.aborted ? 'Local screening preparation cancelled.' : error.message,
+          controller.signal.aborted
+            ? 'Local screening preparation cancelled.'
+            : (error?.message ?? String(error)),
         ),
       )
       .finally(() => {
@@ -779,7 +796,7 @@ export async function startEditor(id: string) {
     );
     void recallLocalFile(id)
       .then((file) => file && useLocalFile(file))
-      .catch((error) => localProgress(error.message));
+      .catch((error) => localProgress(error?.message ?? String(error)));
   }
   $<HTMLButtonElement>('exportNotes').disabled = false;
   saveStatus(

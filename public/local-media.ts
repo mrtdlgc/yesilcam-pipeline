@@ -182,9 +182,8 @@ export async function prepareLocalMedia(
       duration = Number(info.format.duration);
     if (!Number.isFinite(duration) || duration <= 0 || duration > options.maxDuration)
       throw new Error('Movie duration exceeds the supported limit.');
-    const audio = info.streams.filter((stream) => stream.codec_type === 'audio')[
-      options.audioStreamIndex
-    ];
+    const audioStreams = info.streams.filter((stream) => stream.codec_type === 'audio');
+    const audio = audioStreams[options.audioStreamIndex];
     if (!audio) throw new Error('The selected audio track is missing.');
     const video = info.streams.find(
       (stream) => stream.codec_type === 'video' && !stream.disposition?.attached_pic,
@@ -203,6 +202,14 @@ export async function prepareLocalMedia(
       frameRate:
         fps >= 1 && fps <= 240 && Math.abs(fps - rate(video?.r_frame_rate)) < 0.001 ? fps : null,
       audioStreamIndex: options.audioStreamIndex,
+      // Native playback cannot reliably select a non-default Matroska audio track.
+      requiresLocalScreening:
+        options.audioStreamIndex !== 0 ||
+        audioStreams.findIndex((stream) => stream.disposition?.default) > 0 ||
+        Boolean(video && audio.codec_name.startsWith('pcm_')) ||
+        !['aac', 'mp3', 'opus', 'vorbis', 'flac', 'pcm_s16le', 'pcm_s24le', 'pcm_f32le'].includes(
+          audio.codec_name,
+        ),
     };
     media.movieHash = await localMovieHash(file);
     const tracks = rankedSubtitleTracks(
@@ -423,7 +430,7 @@ export async function localScreening(
         '-i',
         input,
         '-map',
-        '0:v:0',
+        '0:v:0?',
         '-map',
         `0:a:${media.audioStreamIndex}`,
         '-vf',
@@ -492,7 +499,7 @@ export async function matchLocalFile(
       info.format.tags?.comment === `yesilcam-local:${media.fingerprint}` &&
       Math.abs(Number(info.format.duration) - media.duration) < 0.25
     )
-      return { ...media, audioStreamIndex: 0 };
+      return { ...media, audioStreamIndex: 0, requiresLocalScreening: false };
     throw new Error(
       'This is a different movie or edition. Choose the original file or its saved local screening copy.',
     );

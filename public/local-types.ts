@@ -8,6 +8,7 @@ export interface LocalMedia {
   frameRate: number | null;
   audioStreamIndex: number;
   movieHash?: string;
+  requiresLocalScreening?: boolean;
 }
 export interface LocalWaveform {
   version: 1;

@@ -39,6 +39,8 @@ export function localMediaMetadata(value: unknown): LocalMedia {
       data.size < 131072)
   )
     invalid('Invalid movie lookup fingerprint');
+  if (data.requiresLocalScreening !== undefined && typeof data.requiresLocalScreening !== 'boolean')
+    invalid('Invalid local playback information');
   return {
     version: 1,
     name: data.name,
@@ -48,6 +50,9 @@ export function localMediaMetadata(value: unknown): LocalMedia {
     frameRate: data.frameRate,
     audioStreamIndex: data.audioStreamIndex,
     ...(data.movieHash ? { movieHash: data.movieHash } : {}),
+    ...(data.requiresLocalScreening !== undefined
+      ? { requiresLocalScreening: data.requiresLocalScreening }
+      : {}),
   };
 }
 export function localSubtitle(value: any, media: LocalMedia, targetLanguage?: string) {
